@@ -1,4 +1,4 @@
-# Architecture Proposal (Milestone 0) — status: AWAITING APPROVAL
+# Architecture (Milestone 0 proposal, kept for history)
 
 ## 1. Environment findings (this machine)
 GCC 16.2, GDB 18.1 (Python API), Node 22, VS Code 1.144. **No LLDB, no Clang, no Valgrind.**
@@ -85,7 +85,7 @@ Repository layout follows your suggestion unchanged.
 3. Accept the step cap and `-O0 -g` forced build as MVP constraints?
 
 ---
-# Status after implementation (supersedes plan sections where they differ)
+# Status after implementation (current; supersedes plan sections where they differ)
 All milestones M0-M6 are implemented for the **GDB/Linux** backend. See `limitations.md` for what that means.
 
 | Module | Where | Notes |
