@@ -93,6 +93,10 @@
   },
   "license": "MIT",
   "scripts": {
-    "vscode:prepublish": "echo build via root npm run build"
+    "vscode:prepublish": "echo build via root npm run build",
+    "package": "vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^4.1.0"
   }
 }

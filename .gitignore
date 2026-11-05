@@ -4,3 +4,4 @@ extension/engine
 tests/.tmp-*
 poc/trace*.jsonl
 poc/alloc.log
+*.vsix

@@ -12,8 +12,8 @@ Run from the repo root unless noted. All verified on this machine (Node 22, GDB,
 - Build: `npm run build` (esbuild -> `extension/dist/{extension.js,webview.js,webview.css}`, copies `engine/` to `extension/engine/`)
 - Typecheck: `npm run typecheck` (`tsc -p core && tsc -p extension && tsc -p webview`)
 - Test: `npm test` (`node --experimental-strip-types --test tests/*.test.ts`; 37 tests, ~12 s; needs `g++` and `gdb` because tests really compile and trace the examples)
-- Package the .vsix: `npm run build && cd extension && npx vsce@2.15.0 package --no-dependencies -o ../dsv.vsix`
-  (`@vsce/vsce` was a 404 on the configured registry; the old unscoped `vsce` works. `dsv.vsix` at the root is a tracked artifact; don't regenerate it casually.)
+- Package the .vsix: `npm run build && npm run package -w extension -- -o ../dsv.vsix` (`@vscode/vsce` devDependency of `extension/`; script `vsce package --no-dependencies`).
+  `*.vsix` is gitignored (not tracked).
 - Run one example (no CLI exists; use the test helper, prints step count and program output):
   `node --experimental-strip-types -e 'import("./tests/helpers.ts").then(async h => { const l = await h.load("binary-trees/bst.cpp"); console.log(l.history.length, "steps"); console.log(l.output) })'`
   (`load` takes a path under `examples/`; second arg `setup` runs C++ statements via a generated driver instead of `main`.)
