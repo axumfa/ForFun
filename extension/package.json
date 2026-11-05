@@ -1,0 +1,98 @@
+{
+  "name": "data-structure-visualizer",
+  "displayName": "Data Structure Visualizer",
+  "version": "0.0.1",
+  "private": true,
+  "publisher": "local",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Visualization",
+    "Debuggers"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      {
+        "command": "dsv.visualize",
+        "title": "Visualize Code",
+        "category": "Data Structure Visualizer"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "dsv.visualize",
+          "when": "editorLangId == cpp",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "dsv.visualize",
+          "when": "editorLangId == cpp"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Data Structure Visualizer",
+      "properties": {
+        "dsv.compiler": {
+          "type": "string",
+          "default": "g++",
+          "description": "C++ compiler executable."
+        },
+        "dsv.gdb": {
+          "type": "string",
+          "default": "gdb",
+          "description": "GDB executable (debugger backend)."
+        },
+        "dsv.cppStandard": {
+          "type": "string",
+          "default": "c++17"
+        },
+        "dsv.extraCompilerFlags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Extra flags. -O0 -g are always forced."
+        },
+        "dsv.runTimeoutMs": {
+          "type": "number",
+          "default": 60000
+        },
+        "dsv.compileTimeoutMs": {
+          "type": "number",
+          "default": 60000
+        },
+        "dsv.maxSteps": {
+          "type": "number",
+          "default": 20000
+        },
+        "dsv.maxMemoryMB": {
+          "type": "number",
+          "default": 4096,
+          "description": "Virtual-memory cap (MB) for the traced process tree. 0 = unlimited."
+        },
+        "dsv.isolateNetwork": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run the traced program in a new network namespace when the OS allows it (best effort; not a full sandbox)."
+        }
+      }
+    }
+  },
+  "description": "Visualize your own C++ data-structure implementations step by step, from real execution.",
+  "repository": {
+    "type": "git",
+    "url": "https://example.invalid/data-structure-visualizer"
+  },
+  "license": "MIT",
+  "scripts": {
+    "vscode:prepublish": "echo build via root npm run build"
+  }
+}
