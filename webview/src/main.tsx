@@ -14,7 +14,7 @@ function App() {
     vscode?.postMessage({ type: "ready" });
     return () => window.removeEventListener("message", h);
   }, []);
-  if (!msg) return <div className="note">Run “Data Structure Visualizer: Visualize Code” on a C++ file.</div>;
+  if (!msg) return <div className="note">Run “Data Structure Visualizer: Visualize Code” on a C or C++ file.</div>;
   if (msg.type === "loading") return <div className="note">⏳ {msg.message}</div>;
   if (msg.type === "error") return <pre className="error">{msg.message}</pre>;
   return <Viewer key={msg.id} fileName={msg.fileName} sources={msg.sources} trace={msg.trace} programOutput={msg.programOutput}

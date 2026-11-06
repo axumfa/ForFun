@@ -25,14 +25,14 @@
       "editor/context": [
         {
           "command": "dsv.visualize",
-          "when": "editorLangId == cpp",
+          "when": "editorLangId == cpp || editorLangId == c",
           "group": "navigation"
         }
       ],
       "commandPalette": [
         {
           "command": "dsv.visualize",
-          "when": "editorLangId == cpp"
+          "when": "editorLangId == cpp || editorLangId == c"
         }
       ]
     },
@@ -42,7 +42,7 @@
         "dsv.compiler": {
           "type": "string",
           "default": "g++",
-          "description": "C++ compiler executable."
+          "description": "C++ compiler executable (also used to build the allocation shim, even for C programs)."
         },
         "dsv.gdb": {
           "type": "string",
@@ -60,6 +60,23 @@
           },
           "default": [],
           "description": "Extra flags. -O0 -g are always forced."
+        },
+        "dsv.cCompiler": {
+          "type": "string",
+          "default": "gcc",
+          "description": "C compiler executable, used for .c files."
+        },
+        "dsv.cStd": {
+          "type": "string",
+          "default": "c11"
+        },
+        "dsv.extraCFlags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Extra flags for .c files. -O0 -g are always forced."
         },
         "dsv.runTimeoutMs": {
           "type": "number",
@@ -86,7 +103,7 @@
       }
     }
   },
-  "description": "Visualize your own C++ data-structure implementations step by step, from real execution.",
+  "description": "Visualize your own C and C++ data-structure implementations step by step, from real execution.",
   "repository": {
     "type": "git",
     "url": "https://example.invalid/data-structure-visualizer"

@@ -10,13 +10,16 @@ export interface RunnerConfig {
   gdb: string;
   std: string;              // e.g. c++17
   extraFlags: string[];
+  cCompiler?: string;       // used for .c files (default gcc)
+  cStd?: string;            // default c11
+  extraCFlags?: string[];
   compileTimeoutMs: number;
   runTimeoutMs: number;
   maxSteps: number;
   maxOutputBytes: number;
   maxMemoryMB: number;      // virtual-memory cap for the whole tracing process tree (0 = unlimited)
   isolateNetwork: boolean;  // run inside a new network namespace when the OS allows it
-  /** Optional driver: C++ statements run from a generated main() that includes the source (renamed main -> __dsv_user_main). */
+  /** Optional driver: C/C++ statements run from a generated main() that includes the source (renamed main -> __dsv_user_main). */
   entry?: { setup: string };
 }
 
@@ -53,10 +56,14 @@ function exec(cmd: string, args: string[], opts: { cwd: string; env?: NodeJS.Pro
 
 export interface RunResult { trace: Trace; programOutput: string; log: string; sources: Record<string, string>; }
 
-/** Build the driver translation unit. The user's file is #included (so debug info keeps its real path). */
-export function makeDriver(sourceFile: string, setup: string): string {
+/** C for `.c`; everything else (.cpp .cc .cxx .C, and anything unknown) is C++. The comparison is case-sensitive: `.C` is C++. */
+export type Lang = "c" | "c++";
+export const languageOf = (file: string): Lang => (path.extname(file) === ".c" ? "c" : "c++");
+
+/** Build the driver translation unit. The user's file is #included (so debug info keeps its real path). C needs `main(void)`. */
+export function makeDriver(sourceFile: string, setup: string, lang: Lang = "c++"): string {
   return [`#define main __dsv_user_main`, `#include ${JSON.stringify(sourceFile)}`, `#undef main`,
-    `int main() {`, ...setup.split("\n").map((l) => "  " + l), `  return 0;`, `}`, ``].join("\n");
+    lang === "c" ? `int main(void) {` : `int main() {`, ...setup.split("\n").map((l) => "  " + l), `  return 0;`, `}`, ``].join("\n");
 }
 
 export async function runTrace(sourceFile: string, cfg: RunnerConfig, workRoot = os.tmpdir(), signal?: AbortSignal): Promise<RunResult> {
@@ -68,15 +75,18 @@ export async function runTrace(sourceFile: string, cfg: RunnerConfig, workRoot =
   const prog = path.join(work, "prog"), shim = path.join(work, "libshim.so");
   const lim = { cwd: work, maxBytes: cfg.maxOutputBytes, memoryMB: cfg.maxMemoryMB || undefined, signal };
   try {
+    const lang = languageOf(sourceFile);
     let unit = sourceFile, driverPath: string | undefined, driverText: string | undefined;
     if (cfg.entry) {
-      driverPath = path.join(work, "dsv_driver.cpp");
-      driverText = makeDriver(sourceFile, cfg.entry.setup);
+      driverPath = path.join(work, lang === "c" ? "dsv_driver.c" : "dsv_driver.cpp");
+      driverText = makeDriver(sourceFile, cfg.entry.setup, lang);
       fs.writeFileSync(driverPath, driverText);
       unit = driverPath;
     }
     // Forced -O0 -g -fno-inline: tracing needs faithful line/variable info. User flags come first so ours win.
-    const c1 = await exec(cfg.compiler, [`-std=${cfg.std}`, ...cfg.extraFlags, "-O0", "-g", "-fno-inline", "-o", prog, unit],
+    const cc = lang === "c" ? (cfg.cCompiler ?? "gcc") : cfg.compiler;
+    const flags = lang === "c" ? [`-std=${cfg.cStd ?? "c11"}`, ...(cfg.extraCFlags ?? [])] : [`-std=${cfg.std}`, ...cfg.extraFlags];
+    const c1 = await exec(cc, [...flags, "-O0", "-g", "-fno-inline", "-o", prog, unit, ...(lang === "c" ? ["-lm"] : [])],
       { ...lim, timeoutMs: cfg.compileTimeoutMs });
     if (c1.timedOut) throw new RunnerError("compilation timed out");
     if (c1.code !== 0) throw new RunnerError(`compilation failed:\n${c1.stderr}`);

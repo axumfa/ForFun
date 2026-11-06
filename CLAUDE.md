@@ -4,14 +4,14 @@
 `dsv` (Data Structure Visualizer) is a VS Code extension that compiles a user's **C++** program (`g++ -O0 -g`, forced), runs it under GDB
 in a separate process, and visualizes its data structures step by step (arrays, lists, trees, heaps, hash tables, graphs, tries).
 Only relationships actually observed in memory are drawn; structure *classification* is heuristic and shown with a confidence.
-Linux only (GDB + `LD_PRELOAD`). The target language is C++: sources are compiled with `g++` (default `dsv.compiler`) and the shim is C++; plain C is not a tested target.
+Linux only (GDB + `LD_PRELOAD`). Targets are C++ (`g++`, default `dsv.compiler`) and plain C (`gcc`, `dsv.cCompiler`, `-std=c11`, `-lm`), chosen by file extension (`.c` = C, everything else C++). The shim is C++ and is always built with `dsv.compiler`.
 
 ## Commands
 Run from the repo root unless noted. All verified on this machine (Node 22, GDB, g++).
 - Install: `npm ci` (npm workspaces: `extension`, `webview`)
 - Build: `npm run build` (esbuild -> `extension/dist/{extension.js,webview.js,webview.css}`, copies `engine/` to `extension/engine/`)
 - Typecheck: `npm run typecheck` (`tsc -p core && tsc -p extension && tsc -p webview`)
-- Test: `npm test` (`node --experimental-strip-types --test tests/*.test.ts`; 48 tests, ~12 s; needs `g++` and `gdb` because tests really compile and trace the examples)
+- Test: `npm test` (`node --experimental-strip-types --test tests/*.test.ts`; 59 tests, ~12 s; needs `g++` and `gdb` because tests really compile and trace the examples)
 - Package the .vsix: `npm run build && npm run package -w extension -- -o ../dsv.vsix` (`@vscode/vsce` devDependency of `extension/`; script `vsce package --no-dependencies`).
   `*.vsix` is gitignored (not tracked).
 - Run one example (no CLI exists; use the test helper, prints step count and program output):
@@ -29,9 +29,9 @@ Run from the repo root unless noted. All verified on this machine (Node 22, GDB,
   - `models/scene.ts`: renderer-independent `Scene`/`SceneKind`/`SNode`/`SEdge`
   - `explain/explain.ts`: step explanations from recorded facts (`ExplanationProvider`; no LLM)
   - `analysis/`: `static.ts` (regex-level complexity/type guesses), `findings.ts` (leak/dangling/crash from the run)
-- `extension/src/`: `extension.ts` (activation), `commands/visualize.ts` ("Visualize Code"), `execution/runner.ts` (compile, driver generation, limits, spawn gdb, cancel; **no `vscode` import**, unit-testable), `communication/` (panel host + protocol), `logger.ts`
+- `extension/src/`: `extension.ts` (activation), `commands/visualize.ts` ("Visualize Code"), `execution/runner.ts` (language by extension, compile, driver generation, limits, spawn gdb, cancel; **no `vscode` import**, unit-testable), `communication/` (panel host + protocol), `logger.ts`
 - `webview/src/`: React + SVG UI. `components/` (Viewer, Panels), `timeline/`, `hooks/usePlayback.ts`, `visualizers/SceneView.tsx`. Consumes `History` + adapters only; knows nothing about GDB.
-- `examples/<category>/*.cpp`: sample programs used by tests (each prints its own final structure). `scripts/build.mjs`: bundler. `poc/`: throwaway M0 prototype, not product code.
+- `examples/<category>/*.cpp` and `examples/c/*.c`: sample programs used by tests (each prints its own final structure). `scripts/build.mjs`: bundler. `poc/`: throwaway M0 prototype, not product code.
 - `docs/`: `architecture.md` (decisions D1-D13), `events.md` (schema), `limitations.md`.
 
 Data flow: user program -> compile + `shim.cpp` + `gdb_tracer.py` (in runner.ts's child process) -> JSONL events -> `parseTrace` -> `History` snapshots -> `interpret()` adapters -> `Scene[]` -> webview.
@@ -55,7 +55,7 @@ Model on the BST: it is `treeScene` in `core/adapters/nodes.ts` wrapped as `tree
 - Style in existing code: 2-space indent, double quotes, semicolons, dense one-line helpers, `import type` for types, short doc comments stating invariants.
 - `core/` stays pure (no `vscode`, no DOM); `extension/src/execution/runner.ts` must not import `vscode`.
 - Tests: `tests/<area>.test.ts` using `node:test` + `node:assert/strict`; shared helpers in `tests/helpers.ts`. Tests trace real examples (no mocks of GDB). `tests/.tmp-*` is gitignored scratch output.
-- Examples: `examples/<kebab-category>/<name>.cpp`. Scene ids are stable (heap address or `<scene>[i]`).
+- Examples: `examples/<kebab-category>/<name>.cpp`; C ones in `examples/c/<name>.c` (tests in `tests/c.test.ts`). Scene ids are stable (heap address or `<scene>[i]`).
 - Python in `engine/` is deliberately thin; normalization belongs in TS `core/`. Bump `SCHEMA_VERSION` and update `docs/events.md` on any breaking trace change.
 
 ## Current status

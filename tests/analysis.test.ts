@@ -63,3 +63,20 @@ test("suggestions and observed cost are derived from the trace", async () => {
   assert.equal(c.calls >= 6, true);
   assert.ok(stepAt(l, "inorder(root);") > 0);
 });
+
+test("static analysis: C typedef structs (tagged and anonymous) are found under the typedef name, self-pointers via tag or name", () => {
+  const a = analyzeSource(`typedef struct node { int v; struct node* next; } Node;
+typedef struct { int len; int* data; } Vec;
+typedef struct Tree { int k; struct Tree *left, *right; } Tree;
+typedef union { int i; float f; } Num;
+struct Plain { int x; };
+`);
+  const by = (n: string) => a.structs.find((s) => s.name === n);
+  assert.deepEqual([by("Node")?.guess, by("Node")?.selfPointers, by("Node")?.typedef], ["singly linked list node", ["next"], true]);
+  assert.deepEqual([by("Vec")?.guess, by("Vec")?.typedef], ["plain struct", true]);
+  assert.equal(by("Tree")?.guess, "binary tree node");
+  assert.equal(by("Num")?.typedef, true);
+  assert.equal(by("Plain")?.typedef, undefined);
+  assert.equal(by("node"), undefined, "the tag is not listed separately from its typedef name");
+  assert.equal(analyzeSource(ex("c/bst.c")).structs.find((s) => s.name === "Node")!.guess, "binary tree node");
+});

@@ -1,8 +1,9 @@
 import * as path from "node:path";
 import * as vscode from "vscode";
-import { runTrace, RunnerError, type RunnerConfig } from "../execution/runner.ts";
+import { runTrace, RunnerError, languageOf, type RunnerConfig } from "../execution/runner.ts";
 import { VisualizerPanel } from "../communication/panel.ts";
 import { analyzeSource } from "../../../core/analysis/static.ts";
+import { setupTemplate, setupPrompt } from "./templates.ts";
 import type { Logger } from "../logger.ts";
 
 export function readConfig(ctx: vscode.ExtensionContext, entry?: { setup: string }): RunnerConfig {
@@ -11,20 +12,21 @@ export function readConfig(ctx: vscode.ExtensionContext, entry?: { setup: string
     engineDir: path.join(ctx.extensionPath, "engine"),
     compiler: c.get("compiler", "g++"), gdb: c.get("gdb", "gdb"), std: c.get("cppStandard", "c++17"),
     extraFlags: c.get<string[]>("extraCompilerFlags", []),
+    cCompiler: c.get("cCompiler", "gcc"), cStd: c.get("cStd", "c11"), extraCFlags: c.get<string[]>("extraCFlags", []),
     compileTimeoutMs: c.get("compileTimeoutMs", 60000), runTimeoutMs: c.get("runTimeoutMs", 60000),
     maxSteps: c.get("maxSteps", 20000), maxOutputBytes: 1 << 20,
     maxMemoryMB: c.get("maxMemoryMB", 4096), isolateNetwork: c.get("isolateNetwork", true), entry,
   };
 }
 
-interface Pick extends vscode.QuickPickItem { kind_: "main" | "function" | "class"; name: string; params?: string; }
+interface Pick extends vscode.QuickPickItem { kind_: "main" | "function" | "class"; name: string; params?: string; typedef?: boolean; }
 
 function choose(doc: vscode.TextDocument, cursor: vscode.Position): Thenable<Pick | undefined> {
   const a = analyzeSource(doc.getText());
   const items: Pick[] = [{ label: "$(play) Run the whole program (main)", description: "", kind_: "main", name: "main" }];
   const line = cursor.line + 1;
   const fns = a.functions.filter((f) => f.name !== "main").map<Pick>((f) => ({ label: `$(symbol-function) ${f.name}()`, description: `line ${f.line}`, detail: f.params ? `(${f.params})` : "", kind_: "function", name: f.name, params: f.params }));
-  const cls = a.structs.map<Pick>((s) => ({ label: `$(symbol-class) ${s.name}`, description: `line ${s.line} — ${s.guess}`, kind_: "class", name: s.name }));
+  const cls = a.structs.map<Pick>((s) => ({ label: `$(symbol-class) ${s.name}`, description: `line ${s.line} — ${s.guess}`, kind_: "class", name: s.name, typedef: s.typedef }));
   const here = a.functions.find((f) => f.line <= line && line <= f.endLine && f.name !== "main");
   items.push(...fns.sort((x, y) => Number(y.name === here?.name) - Number(x.name === here?.name)), ...cls);
   return vscode.window.showQuickPick(items, { title: "Visualize which code?", placeHolder: "Pick main, a function or a class to call from a generated driver" });
@@ -33,7 +35,7 @@ function choose(doc: vscode.TextDocument, cursor: vscode.Position): Thenable<Pic
 export async function visualize(ctx: vscode.ExtensionContext, log: Logger): Promise<void> {
   const editor = vscode.window.activeTextEditor;
   if (!editor || editor.document.isUntitled || !/^(cpp|c)$/.test(editor.document.languageId)) {
-    void vscode.window.showErrorMessage("Data Structure Visualizer: open a saved C++ file first.");
+    void vscode.window.showErrorMessage("Data Structure Visualizer: open a saved C or C++ file first.");
     return;
   }
   const pick = await choose(editor.document, editor.selection.active);
@@ -41,10 +43,10 @@ export async function visualize(ctx: vscode.ExtensionContext, log: Logger): Prom
   let entry: { setup: string } | undefined;
   if (pick.kind_ !== "main") {
     const key = `setup:${editor.document.fileName}:${pick.name}`;
-    const template = ctx.workspaceState.get<string>(key) ?? (pick.kind_ === "function" ? `${pick.name}(/* ${pick.params ?? ""} */);` : `${pick.name} obj; /* obj.method(); */`);
+    const lang = languageOf(editor.document.fileName), tp = setupPrompt(lang);
+    const template = ctx.workspaceState.get<string>(key) ?? setupTemplate({ kind_: pick.kind_, name: pick.name, params: pick.params, typedef: pick.typedef }, lang);
     const setup = await vscode.window.showInputBox({
-      title: "C++ statements to run (variables, inputs, the call)", value: template, valueSelection: [0, 0], ignoreFocusOut: true,
-      prompt: "Executed from a generated main(); the file's own main() is not run. Example: Node* h = nullptr; h = push(h, 3); h = push(h, 4);",
+      title: tp.title, value: template, valueSelection: [0, 0], ignoreFocusOut: true, prompt: tp.prompt,
       validateInput: (v) => (v.trim() ? undefined : "Enter at least one statement"),
     });
     if (setup === undefined) return;
@@ -62,7 +64,7 @@ export async function visualize(ctx: vscode.ExtensionContext, log: Logger): Prom
   };
   const t0 = Date.now();
   try {
-    const r = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "Tracing C++ execution", cancellable: true }, (_p, token) => {
+    const r = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "Tracing execution", cancellable: true }, (_p, token) => {
       const ac = new AbortController(); token.onCancellationRequested(() => ac.abort());
       return runTrace(file, readConfig(ctx, entry), undefined, ac.signal);
     });

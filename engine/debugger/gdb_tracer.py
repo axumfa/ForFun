@@ -1,7 +1,7 @@
 """GDB backend: single-steps a -O0 -g debuggee and writes trace schema v2 (JSONL).
 Run:  gdb -q -batch -x gdb_tracer.py --args ./prog    with DSV_* env vars (see CONFIG).
 Principle: every value written here was read from the debuggee's memory; nothing is inferred or invented."""
-import gdb, json, os, signal, threading, time
+import gdb, json, os, re, signal, threading, time
 
 SCHEMA = 2
 E = os.environ
@@ -21,6 +21,15 @@ double_frees = []
 logpos = 0
 hx = hex
 
+def tname(ty):
+    """One spelling per type. A struct/union/enum with a tag is named by its tag however it was reached ("struct Node", "Node", or a
+    typedef of it); an anonymous one (`typedef struct {...} Name;`) is named by the typedef, which only the UNSTRIPPED type still has."""
+    try:
+        st = ty.strip_typedefs().unqualified()
+        if st.code in (gdb.TYPE_CODE_STRUCT, gdb.TYPE_CODE_UNION, gdb.TYPE_CODE_ENUM) and st.name: return st.name
+    except gdb.error: pass
+    return re.sub(r"\b(struct|union|enum)\s+(?=\w)", "", str(ty))
+
 def read_log():
     global logpos
     with open(LOG) as f:
@@ -30,14 +39,23 @@ def read_log():
         if len(p) < 2: continue
         a = int(p[1], 16)
         if p[0] == "A": allocs[a] = {"size": int(p[2]), "state": "LIVE"}; known.pop(a, None)
+        elif p[0] == "R":     # realloc: R old new size. The learned type follows the block, whether it grew in place or moved.
+            new = int(p[2], 16); ty = known.get(a) if a else None
+            if a and a != new and a in allocs: allocs[a]["state"] = "FREED"      # moved: the old block is freed (keeps its type, like free())
+            allocs[new] = {"size": int(p[3]), "state": "LIVE"}
+            if a != new: known.pop(new, None)
+            if ty is not None: known[new] = ty
         elif p[0] == "F":
             if a in allocs and allocs[a]["state"] == "FREED": double_frees.append(hx(a))
             if a in allocs: allocs[a]["state"] = "FREED"
 
 def find_alloc(addr):
+    stale = (None, None)
     for b, i in allocs.items():
-        if b <= addr < b + max(i["size"], 1): return b, i
-    return None, None
+        if b <= addr < b + max(i["size"], 1):
+            if i["state"] == "LIVE": return b, i
+            if stale[0] is None: stale = (b, i)     # a freed block may overlap memory reused by a live one: live wins
+    return stale
 
 def classify(addr):
     if addr == 0: return "null", None, 0
@@ -69,18 +87,18 @@ def read_heap(base, ty, objs):
     if key in objs: return
     info = allocs[base]; known[base] = ty
     tt = ty.strip_typedefs()
-    ent = {"type": str(ty), "state": "LIVE", "size": info["size"]}
+    ent = {"type": tname(ty), "state": "LIVE", "size": info["size"]}
     objs[key] = ent
     try:
         p = gdb.Value(base).cast(ty.pointer())
         if tt.code == gdb.TYPE_CODE_STRUCT or tt.code == gdb.TYPE_CODE_UNION:
             if info["size"] >= tt.sizeof and tt.sizeof > 0 and info["size"] // tt.sizeof > 1:   # new T[n] of structs
                 n = min(info["size"] // tt.sizeof, MAX_ELEMS)
-                ent["type"] = str(ty) + "[]"; ent["elems"] = [read_val((p + i).dereference(), objs, 1) for i in range(n)]
+                ent["type"] = tname(ty) + "[]"; ent["elems"] = [read_val((p + i).dereference(), objs, 1) for i in range(n)]
             else: ent["fields"] = read_struct_fields(p.dereference(), tt, objs, 0)
         else:
             sz = max(tt.sizeof, 1); n = min(info["size"] // sz, MAX_ELEMS)
-            ent["type"] = str(ty) + "[]"; ent["elems"] = [read_val((p + i).dereference(), objs, 1) for i in range(n)]
+            ent["type"] = tname(ty) + "[]"; ent["elems"] = [read_val((p + i).dereference(), objs, 1) for i in range(n)]
     except gdb.error as e:
         ent["state"] = "UNREADABLE"; ent["error"] = str(e)
 
@@ -91,7 +109,7 @@ def read_val(v, objs, depth=0):
             return read_val(v.referenced_value(), objs, depth)
         if t.code == gdb.TYPE_CODE_PTR:
             a = int(v); kind, base, off = classify(a)
-            r = {"ptr": hx(a), "kind": kind, "to": str(t.target())}
+            r = {"ptr": hx(a), "kind": kind, "to": tname(t.target())}
             if kind in ("object", "freed"): r["obj"] = hx(base)
             if kind == "object":
                 r["offset"] = off
@@ -105,10 +123,10 @@ def read_val(v, objs, depth=0):
         if t.code == gdb.TYPE_CODE_FLT: return float(v)
         if t.code == gdb.TYPE_CODE_ARRAY:
             lo, hi = t.range(); n = min(hi - lo + 1, MAX_ELEMS)
-            r = {"kind": "array", "elemType": str(t.target()), "elems": [read_val(v[lo + i], objs, depth + 1) for i in range(n)]}
+            r = {"kind": "array", "elemType": tname(t.target()), "elems": [read_val(v[lo + i], objs, depth + 1) for i in range(n)]}
             if addr_of(v): r["addr"] = addr_of(v)
             return r
-        n = t.name or str(t)
+        n = t.name or tname(v.type)
         if t.code == gdb.TYPE_CODE_STRUCT and is_vector(t) and depth < 6:
             st, fi = v["_M_impl"]["_M_start"], v["_M_impl"]["_M_finish"]
             cap = int(v["_M_impl"]["_M_end_of_storage"] - st)
@@ -158,7 +176,7 @@ def snapshot():
     for b, i in list(allocs.items()):
         if i["state"] == "LIVE" and hx(b) not in objs and b in known: read_heap(b, known[b], objs)
     for b, i in allocs.items():
-        if i["state"] == "FREED" and b in known: objs.setdefault(hx(b), {"type": str(known[b]), "state": "FREED", "size": i["size"]})
+        if i["state"] == "FREED" and b in known: objs.setdefault(hx(b), {"type": tname(known[b]), "state": "FREED", "size": i["size"]})
     return {"frames": frames, "objects": objs}
 
 def diff(old, new):

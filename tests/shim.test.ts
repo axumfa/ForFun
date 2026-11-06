@@ -47,9 +47,9 @@ int main() { N* n = new N; out("n", n); delete n; return 0; }`, "c++");
   assert.deepEqual(mine, [`A ${p.n} 16`, `F ${p.n}`]);
 });
 
-test("shim: realloc(NULL, n) logs only A", () => {
-  const { ptrs: p, log } = run(`int main() { void* a = realloc(0, 64); out("a", a); free(a); return 0; }`);
-  assert.deepEqual(log, [`A ${p.a} 64`, `F ${p.a}`]);
+test("shim: realloc(NULL, n) logs one R record with old = 0", () => {
+  const { ptrs: p, log } = run(`int main() { void* volatile z = 0; void* a = realloc(z, 64); out("a", a); free(a); return 0; }`);
+  assert.deepEqual(log, [`R 0 ${p.a} 64`, `F ${p.a}`]);
 });
 
 test("shim: realloc(p, 0) logs only F", () => {
@@ -58,17 +58,17 @@ test("shim: realloc(p, 0) logs only F", () => {
   assert.deepEqual(log, [`A ${p.a} 64`, `F ${p.a}`]);
 });
 
-test("shim: realloc in place logs a second A at the same (live) address = resize", () => {
+test("shim: realloc in place logs R with old == new", () => {
   const { ptrs: p, log } = run(`int main() { void* a = malloc(1000); void* b = realloc(a, 8); out("a", a); out("b", b); free(b); return 0; }`);
   assert.equal(p.a, p.b, "glibc shrinks in place; the test premise");
-  assert.deepEqual(log, [`A ${p.a} 1000`, `A ${p.a} 8`, `F ${p.a}`]);
+  assert.deepEqual(log, [`A ${p.a} 1000`, `R ${p.a} ${p.a} 8`, `F ${p.a}`]);
 });
 
-test("shim: realloc that moves logs F old then A new", () => {
+test("shim: realloc that moves logs a single R old new", () => {
   const { ptrs: p, log } = run(`int main() { void* a = malloc(16); void* keep = malloc(16); void* b = realloc(a, 1 << 20);
   out("a", a); out("b", b); out("k", keep); free(b); free(keep); return 0; }`);
   assert.notEqual(p.a, p.b, "the test premise: the block moved");
-  assert.deepEqual(log, [`A ${p.a} 16`, `A ${p.k} 16`, `F ${p.a}`, `A ${p.b} 1048576`, `F ${p.b}`, `F ${p.k}`]);
+  assert.deepEqual(log, [`A ${p.a} 16`, `A ${p.k} 16`, `R ${p.a} ${p.b} 1048576`, `F ${p.b}`, `F ${p.k}`]);
 });
 
 test("shim: a failed realloc logs nothing and the old block stays live", () => {

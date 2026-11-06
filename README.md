@@ -1,13 +1,13 @@
 # Data Structure Visualizer
 
-Visualize **your own C++ implementations** of data structures from their *real execution*. The program is compiled with
+Visualize **your own C and C++ implementations** of data structures from their *real execution*. The program is compiled with
 `-O0 -g`, run under GDB in a separate process, and every line is recorded: variables, heap allocations, pointer values.
 The UI only draws relationships that were observed in memory; it never guesses or replays canned animations.
 
 ## Use
-1. Open a C++ file, right-click → **Visualize Code** (or run the command from the palette).
-2. Pick `main`, a function, or a class. For a function/class, enter the C++ statements to run, e.g.
-   `Node* h = nullptr; h = push(h, 3); h = push(h, 4); remove(h, 3);` (a generated `main()` includes your file; yours is not run).
+1. Open a `.c` or `.cpp` file, right-click → **Visualize Code** (or run the command from the palette).
+2. Pick `main`, a function, or a class. For a function/class, enter the statements to run, e.g.
+   `Node* h = nullptr; h = push(h, 3); h = push(h, 4); remove(h, 3);` (C: `Node* h = NULL; ...`; a plain `struct Node` is offered as `struct Node obj = {0};`) (a generated `main()` includes your file; yours is not run).
 3. Use Play / Pause / Prev / Next / Reset / speed / timeline (keys: ← → Space Home). Click a node to inspect it.
 
 ## Recognised structures
@@ -17,8 +17,9 @@ vector), tries, and a generic pointer-graph fallback. Each scene shows a **confi
 (hover). Edges are always observed pointer values; classification is a heuristic.
 
 ## Requirements and settings
-Linux, `g++`, `gdb` with Python support. Settings under `dsv.*`: compiler, gdb, cppStandard, extraCompilerFlags, timeouts, maxSteps,
-maxMemoryMB, isolateNetwork. See `docs/limitations.md` for what is *not* supported (important before relying on it).
+Linux, `g++` (also builds the allocation shim), `gcc` for C files, `gdb` with Python support. The language comes from the file extension
+(`.c` = C; `.cpp .cc .cxx .C` = C++). Heap blocks from `malloc/calloc/realloc/free` and `new/delete` are tracked. Settings under `dsv.*`: compiler, cCompiler,
+gdb, cppStandard, cStd (default `c11`), extraCompilerFlags, extraCFlags, timeouts, maxSteps, maxMemoryMB, isolateNetwork. See `docs/limitations.md` for what is *not* supported (important before relying on it).
 
 ## Develop
 `npm install && npm run build && npm test` — F5 on `extension/` runs it in an Extension Development Host. Architecture: `docs/architecture.md`.

@@ -1,10 +1,15 @@
 # Limitations and known risks (current)
 
+**Languages**: C (`.c`, `gcc -std=c11`, `-lm` linked) and C++ (`.cpp .cc .cxx .C`, `g++`) are supported; the language is chosen by file extension (case-sensitive: `.C` is C++). Settings: `dsv.cCompiler`, `dsv.cStd`, `dsv.extraCFlags` for C; `dsv.compiler`, `dsv.cppStandard`, `dsv.extraCompilerFlags` for C++.
+- The allocation shim is C++ and is always built with `dsv.compiler` (`g++`), even for C programs, so `g++` must be installed. It links `libstdc++` into the traced C program (it logs exactly the program's own allocations; checked).
+- **Anonymous nested struct/union members are not read.** Fields of an unnamed member (`struct Item { int kind; union { int i; float f; }; }`: `i` and `f`) are skipped, so values and pointers stored there do not appear. A *named* member of an anonymous type (`struct { int x, y; } pos;`) is read, but its type is shown as `struct {...}`.
+- C type names are canonical: a struct with a tag is shown by its tag however it is spelled (`struct Node`, `Node`, a typedef of it); an anonymous `typedef struct {...} Name;` is shown as `Name`.
+
 **Platform**: Linux only (GDB + `LD_PRELOAD`). macOS/Windows return an explicit error. An LLDB backend behind `DebuggerBackend` is future work;
 LLDB/Clang were not installed here and nothing was tested with them.
 
 **Tracing**
-- Heap objects come from the glibc malloc family (`malloc`, `calloc`, `realloc`, `reallocarray`, `free`, `memalign`, `aligned_alloc`, `posix_memalign`; `operator new/delete` go through it), logged by the `LD_PRELOAD` shim. Requires glibc (the shim calls `__libc_*`). Only the root process is logged: forked and exec'd children are not. Not tracked: `mmap`-based allocators, custom arenas, `unique_ptr` internals' *types*, stack objects. An in-place `realloc` is logged as a resize (a second `A` at a live address); the tracer forgets the learned type of that block until a typed pointer reaches it again.
+- Heap objects come from the glibc malloc family (`malloc`, `calloc`, `realloc`, `reallocarray`, `free`, `memalign`, `aligned_alloc`, `posix_memalign`; `operator new/delete` go through it), logged by the `LD_PRELOAD` shim. Requires glibc (the shim calls `__libc_*`). Only the root process is logged: forked and exec'd children are not. Not tracked: `mmap`-based allocators, custom arenas, `unique_ptr` internals' *types*, stack objects. `realloc` is one record (`R old new size`); the tracer keeps the learned type of the block whether it grew in place or moved. A moved-from block is reported freed, like `free()` (drawn as a dashed ghost only while a pointer still refers to it).
   Allocations made before `main` (e.g. by global constructors) are kept on purpose: they are user data. Only blocks whose type was learned from a typed pointer are drawn or counted in findings, so untyped runtime buffers (such as stdio's) never show up.
   Smart pointers appear as plain structs. STL containers other than `std::vector` and `std::string` are shown as raw text.
 - Builds are forced to `-O0 -g -fno-inline`. Optimised or inlined code is not supported.

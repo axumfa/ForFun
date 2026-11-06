@@ -1,5 +1,6 @@
 /** Lightweight, regex-level static analysis. Results are *estimates* and say so; they never override observed runtime behaviour. */
-export interface StructInfo { name: string; line: number; selfPointers: string[]; guess: string; evidence: string; }
+/** `typedef` is true when `name` is a typedef name (C: use `Name x;`, not `struct Name x;`). */
+export interface StructInfo { name: string; line: number; selfPointers: string[]; guess: string; evidence: string; typedef?: boolean; }
 export interface FunctionInfo { name: string; params: string; isMethod: boolean; line: number; endLine: number; loopDepth: number; selfCalls: number; estimate: string; evidence: string; }
 export interface SourceAnalysis { structs: StructInfo[]; functions: FunctionInfo[]; }
 
@@ -28,12 +29,20 @@ function guessStruct(name: string, self: string[], body: string): { guess: strin
 export function analyzeSource(source: string): SourceAnalysis {
   const src = stripComments(source);
   const structs: StructInfo[] = [];
-  for (const m of src.matchAll(/\b(?:struct|class)\s+(\w+)\s*(?::[^{;]*)?\{/g)) {
-    const open = m.index! + m[0].length - 1, close = matchBrace(src, open), body = src.slice(open + 1, close), name = m[1]!;
-    const self = [...body.matchAll(new RegExp(`\\b${name}\\s*\\*\\s*(\\w+)`, "g"))].map((x) => x[1]!).filter((f) => !/^\(/.test(f));
+  // `struct|class Tag {…}` (C++ and C), plus the C forms `typedef struct Tag {…} Name;` and `typedef struct {…} Name;`
+  // (the typedef name is what the user's code and the debugger use; self-pointers may be spelled with the tag or the name).
+  for (const m of src.matchAll(/(\btypedef\s+)?\b(struct|class|union)\b\s*(\w+)?\s*(?::[^{;]*)?\{/g)) {
+    const isTypedef = !!m[1], tag = m[3];
+    if (!isTypedef && (!tag || m[2] === "union")) continue;
+    const open = m.index! + m[0].length - 1, close = matchBrace(src, open), body = src.slice(open + 1, close);
+    const alias = isTypedef ? /^\s*(\w+)\s*;/.exec(src.slice(close + 1))?.[1] : undefined;
+    if (isTypedef && !alias) continue;
+    const name = alias ?? tag!, names = [...new Set([name, tag].filter((x): x is string => !!x))];
+    // `T *a;` and the C idiom `T *a, *b;` (every declarator of the list is a self-pointer)
+    const self = [...body.matchAll(new RegExp(`\\b(?:${names.join("|")})\\s*(\\*\\s*\\w+(?:\\s*,\\s*\\*\\s*\\w+)*)`, "g"))].flatMap((x) => [...x[1]!.matchAll(/\*\s*(\w+)/g)].map((y) => y[1]!));
     const uniq = [...new Set(self)];
-    const g = guessStruct(name, uniq, body);
-    structs.push({ name, line: lineOf(src, m.index!), selfPointers: uniq, guess: g.guess, evidence: g.evidence });
+    const g = guessStruct(`(?:${names.join("|")})`, uniq, body);
+    structs.push({ name, line: lineOf(src, m.index!), selfPointers: uniq, guess: g.guess, evidence: g.evidence, ...(isTypedef ? { typedef: true } : {}) });
   }
   const functions: FunctionInfo[] = [];
   for (const m of src.matchAll(/(?:^|[;}\n])\s*(?:[\w:<>,~*&\s]+?)\s+(\w+)\s*\(([^;{}()]*)\)\s*(?:const\s*)?(?:noexcept\s*)?(?::[^{;]*)?\{/g)) {

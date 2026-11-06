@@ -9,7 +9,8 @@ const printed = (o: string) => o.trim().split(/\s+/);
 
 test("INVARIANT: every drawn heap edge exists in the observed pointer data (all examples, all steps)", async () => {
   const files = ["linked-lists/list.cpp", "linked-lists/singly.cpp", "linked-lists/malloc_list.cpp", "linked-lists/doubly.cpp", "binary-trees/bst.cpp", "binary-trees/avl.cpp", "binary-trees/rbtree.cpp",
-    "hash-tables/chained.cpp", "tries/trie.cpp", "stacks-queues/stack_queue.cpp"];
+    "hash-tables/chained.cpp", "tries/trie.cpp", "stacks-queues/stack_queue.cpp",
+    "c/singly.c", "c/bst.c", "c/dynarray.c", "c/hash.c"];
   for (const f of files) {
     const l = await load(f);
     for (let i = 0; i < l.history.length; i++) {

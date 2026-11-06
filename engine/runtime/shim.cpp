@@ -1,5 +1,6 @@
 // LD_PRELOAD shim: logs the malloc family (operator new/delete go through it) to the file in $DSV_ALLOC_LOG.
-// Log lines: "A <hex addr> <size>" (allocation, or resize when the address is already live) and "F <hex addr>" (free).
+// Log lines: "A <hex addr> <size>" (allocation), "F <hex addr>" (free) and "R <hex old> <hex new> <size>" (successful realloc of a live
+// block; old is 0 for realloc(NULL, n); old == new when it grew/shrank in place). realloc(p, 0) is logged as "F p".
 // Uses only write(2) (one call per line) and the glibc-internal __libc_* entry points: glibc required.
 // Only the process that loaded the shim first is logged: forked children (pid != root) and exec'd children (env var removed) are silent.
 #include <cerrno>
@@ -35,6 +36,7 @@ static size_t put_hex(char* b, uintptr_t v) { char t[20]; int n = 0; do { t[n++]
 static size_t put_dec(char* b, size_t v) { char t[24]; int n = 0; do { t[n++] = char('0' + v % 10); v /= 10; } while (v); size_t i = 0; while (n) b[i++] = t[--n]; return i; }
 /** One write() per line (atomic for O_APPEND files of this size). */
 static void logA(void* p, size_t n) { char b[64]; size_t i = 0; b[i++] = 'A'; b[i++] = ' '; i += put_hex(b + i, (uintptr_t)p); b[i++] = ' '; i += put_dec(b + i, n); b[i++] = '\n'; ssize_t r = write(fd, b, i); (void)r; }
+static void logR(void* o, void* p, size_t n) { char b[96]; size_t i = 0; b[i++] = 'R'; b[i++] = ' '; i += put_hex(b + i, (uintptr_t)o); b[i++] = ' '; i += put_hex(b + i, (uintptr_t)p); b[i++] = ' '; i += put_dec(b + i, n); b[i++] = '\n'; ssize_t r = write(fd, b, i); (void)r; }
 static void logF(void* p) { char b[40]; size_t i = 0; b[i++] = 'F'; b[i++] = ' '; i += put_hex(b + i, (uintptr_t)p); b[i++] = '\n'; ssize_t r = write(fd, b, i); (void)r; }
 
 extern "C" {
@@ -54,16 +56,13 @@ void free(void* p) noexcept {
 void free_sized(void* p, size_t) noexcept { free(p); }                 // glibc 2.43+; they bypass free() inside libc
 void free_aligned_sized(void* p, size_t, size_t) noexcept { free(p); }
 
-/** realloc: (NULL,n) == malloc: only A. (p,0) frees: only F. Failure: nothing. Success in place: one A at the live address (= resize);
- *  success elsewhere: F old, then A new. */
+/** realloc: one "R old new size" record on success (old = 0 for realloc(NULL, n)). (p,0) frees: only F. Failure: nothing (p stays valid). */
 void* realloc(void* p, size_t n) noexcept {
   if (!tracing()) return __libc_realloc(p, n);
   Guard g; void* q = __libc_realloc(p, n);
-  if (!p) { if (q) logA(q, n); return q; }
-  if (n == 0) { logF(p); return nullptr; }   // glibc frees p and returns NULL
-  if (!q) return nullptr;                    // failed: p is still valid and unchanged
-  if (q != p) logF(p);
-  logA(q, n); return q;
+  if (p && n == 0) { logF(p); return nullptr; }   // glibc frees p and returns NULL
+  if (q) logR(p, q, n);
+  return q;
 }
 void* reallocarray(void* p, size_t a, size_t b) noexcept {
   size_t n; if (__builtin_mul_overflow(a, b, &n)) { errno = ENOMEM; return nullptr; }
