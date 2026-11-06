@@ -221,8 +221,9 @@ def exit_code():
 
 def main():
     gdb.execute("set pagination off"); gdb.execute("set confirm off"); gdb.execute("set print thread-events off")
-    gdb.execute("set environment LD_PRELOAD=" + E["DSV_SHIM"])
-    gdb.execute("set environment DSV_ALLOC_LOG=" + LOG)
+    # Preload via exec-wrapper, not `set environment`: gdb starts the program through /bin/sh, and a shim loaded into that shell
+    # would claim the log (root pid) and then be disabled in the exec'd program. The wrapper runs after the shell.
+    gdb.execute("set exec-wrapper env LD_PRELOAD=%s DSV_ALLOC_LOG=%s" % (E["DSV_SHIM"], LOG))
     gdb.execute("break main")
     gdb.execute("run > %s < /dev/null" % E["DSV_PROG_OUT"], to_string=True)
     prev = {"frames": [], "objects": {}}; n = 0

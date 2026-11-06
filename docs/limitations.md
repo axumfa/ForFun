@@ -4,7 +4,8 @@
 LLDB/Clang were not installed here and nothing was tested with them.
 
 **Tracing**
-- Only `operator new/delete` allocations are tracked as heap objects (not `malloc/free`, not `unique_ptr` internals' *types*, not stack objects).
+- Heap objects come from the glibc malloc family (`malloc`, `calloc`, `realloc`, `reallocarray`, `free`, `memalign`, `aligned_alloc`, `posix_memalign`; `operator new/delete` go through it), logged by the `LD_PRELOAD` shim. Requires glibc (the shim calls `__libc_*`). Only the root process is logged: forked and exec'd children are not. Not tracked: `mmap`-based allocators, custom arenas, `unique_ptr` internals' *types*, stack objects. An in-place `realloc` is logged as a resize (a second `A` at a live address); the tracer forgets the learned type of that block until a typed pointer reaches it again.
+  Allocations made before `main` (e.g. by global constructors) are kept on purpose: they are user data. Only blocks whose type was learned from a typed pointer are drawn or counted in findings, so untyped runtime buffers (such as stdio's) never show up.
   Smart pointers appear as plain structs. STL containers other than `std::vector` and `std::string` are shown as raw text.
 - Builds are forced to `-O0 -g -fno-inline`. Optimised or inlined code is not supported.
 - A `step` that never returns (a loop whose whole body is on one line and never changes line) is interrupted by a watchdog after

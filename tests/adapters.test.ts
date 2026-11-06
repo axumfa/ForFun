@@ -3,11 +3,12 @@ import assert from "node:assert/strict";
 import { load, stepAt, scenesAt, chain, ptrTarget, outEdges } from "./helpers.ts";
 import { isPtr } from "../core/adapters/analysis.ts";
 import { interpret } from "../core/adapters/index.ts";
+import { findings } from "../core/analysis/findings.ts";
 
 const printed = (o: string) => o.trim().split(/\s+/);
 
 test("INVARIANT: every drawn heap edge exists in the observed pointer data (all examples, all steps)", async () => {
-  const files = ["linked-lists/list.cpp", "linked-lists/singly.cpp", "linked-lists/doubly.cpp", "binary-trees/bst.cpp", "binary-trees/avl.cpp", "binary-trees/rbtree.cpp",
+  const files = ["linked-lists/list.cpp", "linked-lists/singly.cpp", "linked-lists/malloc_list.cpp", "linked-lists/doubly.cpp", "binary-trees/bst.cpp", "binary-trees/avl.cpp", "binary-trees/rbtree.cpp",
     "hash-tables/chained.cpp", "tries/trie.cpp", "stacks-queues/stack_queue.cpp"];
   for (const f of files) {
     const l = await load(f);
@@ -49,6 +50,21 @@ test("singly list: removal frees the node and no live edge points at it", async 
   if (ghost) assert.equal(ghost.status, "freed");                                     // shown only as a dangling ghost
   assert.equal(sc.edges.filter((e) => e.to === (freed as { addr: string }).addr && !e.id.includes("freed")).length, 0, "no live node may link to the freed node");
   assert.equal(state.objects[(freed as { addr: string }).addr]!.state, "FREED");
+});
+
+test("malloc/calloc/free list: drawn as a singly linked list matching the output; free() marks the node freed", async () => {
+  const l = await load("linked-lists/malloc_list.cpp");
+  const { scenes } = scenesAt(l, stepAt(l, "for (Node* c = head"));
+  const sc = scenes.find((s) => s.kind === "singly-linked-list")!;
+  assert.ok(sc);
+  assert.deepEqual(chain(sc, ptrTarget(sc, "head")), printed(l.output));            // 1 3 4
+  assert.deepEqual(sc.nodes.filter((n) => n.status !== "freed").map((n) => n.label), ["1", "3", "4"]);
+  assert.deepEqual(sc.nodes.filter((n) => n.status === "freed").map((n) => n.label), ["2"]);   // 'dead' still points at it: shown as a freed ghost
+  const i = l.history.steps.findIndex((s) => s.events.some((e) => e.type === "object_freed"));
+  assert.ok(i >= 0, "free() must produce an object_freed event");
+  const freed = (l.history.steps[i]!.events.find((e) => e.type === "object_freed") as { addr: string }).addr;
+  assert.equal(l.history.stateAt(i).objects[freed]!.state, "FREED");
+  assert.equal(findings(l.history, l.lines).filter((f) => f.code === "leak").length, 0);   // everything reachable or freed: no false leak
 });
 
 test("empty list and single node: no fabricated edges", async () => {

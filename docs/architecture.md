@@ -102,5 +102,7 @@ Decisions made during implementation:
 - **D12** Function/class visualisation uses a generated driver that `#include`s the user file with `main` renamed, so debug info keeps real paths and no source is rewritten.
 - **D13** Structure kind comes from field types and self-pointers; names only break ties (prev/next vs left/right, heap/queue/stack) and label scenes.
 
+- **D14** The shim wraps the glibc malloc family, not just `operator new`. It is preloaded through gdb's `exec-wrapper` (`env LD_PRELOAD=... DSV_ALLOC_LOG=...`), never `set environment`: gdb starts the program via `/bin/sh`, and a shim loaded into that shell would claim the log and then disable itself in the exec'd program. A forked child never takes the shim's spin lock (the root-pid check comes first), so a fork while another thread allocates cannot deadlock. Findings and adapters depend only on typed heap objects, not on how they were allocated.
+
 Test strategy: every example prints its own final structure; tests assert the *drawn* scene equals the printed output, plus an invariant test
 that no drawn edge lacks a corresponding observed pointer at any step of any example.

@@ -11,7 +11,7 @@ Run from the repo root unless noted. All verified on this machine (Node 22, GDB,
 - Install: `npm ci` (npm workspaces: `extension`, `webview`)
 - Build: `npm run build` (esbuild -> `extension/dist/{extension.js,webview.js,webview.css}`, copies `engine/` to `extension/engine/`)
 - Typecheck: `npm run typecheck` (`tsc -p core && tsc -p extension && tsc -p webview`)
-- Test: `npm test` (`node --experimental-strip-types --test tests/*.test.ts`; 37 tests, ~12 s; needs `g++` and `gdb` because tests really compile and trace the examples)
+- Test: `npm test` (`node --experimental-strip-types --test tests/*.test.ts`; 48 tests, ~12 s; needs `g++` and `gdb` because tests really compile and trace the examples)
 - Package the .vsix: `npm run build && npm run package -w extension -- -o ../dsv.vsix` (`@vscode/vsce` devDependency of `extension/`; script `vsce package --no-dependencies`).
   `*.vsix` is gitignored (not tracked).
 - Run one example (no CLI exists; use the test helper, prints step count and program output):
@@ -63,7 +63,7 @@ Milestones M0-M6 are done for the GDB/Linux backend (see `docs/architecture.md`,
 Known limitations are in [docs/limitations.md](docs/limitations.md); read it before claiming support for something. Do not duplicate it here.
 
 ## Roadmap (in order)
-- M7: `malloc`/`calloc`/`realloc`/`free` tracking
+- M7: done (malloc family tracking, see D14); remaining: nothing
 - M8: STL `map`/`set`/`unordered_map`/`list`/`deque` adapters
 - M9: per-write tracking (watchpoints on the active structure)
 - M10: GitHub Actions CI (typecheck + tests)
