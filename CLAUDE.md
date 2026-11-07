@@ -17,6 +17,7 @@ Run from the repo root unless noted. All verified on this machine (Node 22, GDB,
 - Run one example (no CLI exists; use the test helper, prints step count and program output):
   `node --experimental-strip-types -e 'import("./tests/helpers.ts").then(async h => { const l = await h.load("binary-trees/bst.cpp"); console.log(l.history.length, "steps"); console.log(l.output) })'`
   (`load` takes a path under `examples/`; second arg `setup` runs C++ statements via a generated driver instead of `main`.)
+- CI: `.github/workflows/ci.yml` runs on push to main and PRs (ubuntu-latest, Node 22, apt `gdb`, 20 min timeout): diagnostics (gdb/gcc/ldd/node versions), `npm ci`, build, typecheck, test, then packages `dsv.vsix` and uploads it as the `dsv-vsix` artifact. Failures on Ubuntu but not Fedora may be real portability bugs: diagnose, never skip tests.
 - Interactive: open `extension/` in VS Code, F5 (Extension Development Host), right-click a `.cpp` -> "Visualize Code".
 
 ## Architecture map
@@ -66,7 +67,7 @@ Known limitations are in [docs/limitations.md](docs/limitations.md); read it bef
 - M7: done (malloc family tracking, see D14); remaining: nothing
 - M8: STL `map`/`set`/`unordered_map`/`list`/`deque` adapters
 - M9: per-write tracking (watchpoints on the active structure)
-- M10: GitHub Actions CI (typecheck + tests)
+- M10: done (`.github/workflows/ci.yml`, see Commands > CI)
 - M11: stronger sandboxing (bwrap/seccomp)
 - M12: LLDB backend
 

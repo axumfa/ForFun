@@ -1,6 +1,7 @@
 {
   "name": "data-structure-visualizer-root",
   "private": true,
+  "engines": { "node": ">=22" },
   "workspaces": ["extension", "webview"],
   "scripts": {
     "typecheck": "tsc -p core && tsc -p extension && tsc -p webview",

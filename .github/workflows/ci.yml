@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install gdb
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gdb
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Diagnostics
+        run: |
+          gdb --version | head -1
+          gcc --version | head -1
+          g++ --version | head -1
+          ldd --version | head -1
+          node --version
+          cat /proc/sys/kernel/yama/ptrace_scope || true
+
+      - run: npm ci
+      - run: npm run build
+      - run: npm run typecheck
+      - run: npm test
+
+      - name: Package .vsix
+        run: npm run package -w extension -- -o ../dsv.vsix
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dsv-vsix
+          path: dsv.vsix
+          if-no-files-found: error

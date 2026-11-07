@@ -1,3 +1,5 @@
+[![CI](https://github.com/axumfa/ForFun/actions/workflows/ci.yml/badge.svg)](https://github.com/axumfa/ForFun/actions/workflows/ci.yml)
+
 # Data Structure Visualizer
 
 Visualize **your own C and C++ implementations** of data structures from their *real execution*. The program is compiled with
