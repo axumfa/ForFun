@@ -1,5 +1,5 @@
-/** Trace schema v2. Documented in docs/events.md. Pure types + parser; no I/O, no VS Code, no debugger. */
-export const SCHEMA_VERSION = 2;
+/** Trace schema v3. Documented in docs/events.md. Pure types + parser; no I/O, no VS Code, no debugger. */
+export const SCHEMA_VERSION = 3;
 
 /** A pointer as observed in the debuggee. Only `kind: "object"` denotes a relationship to a tracked heap allocation. */
 export interface PointerValue {
@@ -11,7 +11,24 @@ export interface PointerValue {
 }
 export interface ArrayValue { kind: "array" | "vector"; elemType: string; elems: Value[]; capacity?: number; released?: boolean; addr?: string; }
 export interface StructValue { kind: "struct"; type: string; fields: Record<string, Value>; addr?: string; }
-export type Value = number | string | boolean | PointerValue | ArrayValue | StructValue | null;
+
+export type StlContainer = "map" | "multimap" | "set" | "multiset" | "unordered_map" | "unordered_multimap" | "unordered_set" | "unordered_multiset" | "list" | "deque";
+/** One element. `id` is the node address when the node walk succeeded (map/set/list); `key` is present for map-like containers only.
+ *  `n` (red-black containers, full walk only) = [color 0 red | 1 black, parent, left, right]: *indices into `entries`*, -1 = none, -2 = the header. */
+export interface StlEntry { id?: string; key?: Value; value: Value; n?: [number, number, number, number]; }
+/**
+ * A libstdc++ container read through GDB's pretty-printer (`source: "printer"`) or by walking its nodes (`"walk"`).
+ * `identity` says what `entries[i].id` means: "node" (heap address), or absent (the adapter falls back to key / position).
+ * `internal` (map/set/list) exists only if the node walk was validated end to end; otherwise `internalError` says why not.
+ * `source: "raw"`: no printer and no walk: only `text` (raw struct text) and `unavailable` are meaningful.
+ */
+export interface StlValue {
+  kind: "stl"; container: StlContainer; type: string; size: number; truncated: boolean; entries: StlEntry[];
+  source: "printer" | "walk" | "raw"; addr?: string; keyType?: string; valType?: string;
+  bucketCount?: number; text?: string; unavailable?: string;
+  internal?: { kind: "rb"; header: string; root: number } | { kind: "list"; header: string } | null; internalError?: string;
+}
+export type Value = number | string | boolean | PointerValue | ArrayValue | StructValue | StlValue | null;
 
 export type FileKey = "main" | "driver";
 export interface Frame { fn: string; file: FileKey; line: number; locals: Record<string, Value>; }

@@ -1,6 +1,6 @@
 import type { FileKey, PointerValue, TraceEvent, Value } from "../events/types.ts";
 import type { HeapObject, RuntimeState } from "../snapshots/history.ts";
-import { isArr, isPtr, isScalar, isStruct } from "../adapters/analysis.ts";
+import { isArr, isPtr, isScalar, isStl, isStruct } from "../adapters/analysis.ts";
 
 export function describeObject(o: HeapObject | undefined, addr: string): string {
   if (!o) return addr;
@@ -13,6 +13,7 @@ export function describeValue(v: Value | undefined, objects: Record<string, Heap
   if (isScalar(v)) return String(v);
   if (isArr(v)) return `${v.kind}[${v.elems.length}]`;
   if (isStruct(v)) return `${v.type}{…}`;
+  if (isStl(v)) return v.size >= 0 ? `std::${v.container} with ${v.size} element${v.size === 1 ? "" : "s"}` : `std::${v.container}`;
   return "?";
 }
 export function describePointer(p: PointerValue, objects: Record<string, HeapObject>): string {

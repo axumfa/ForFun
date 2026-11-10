@@ -40,3 +40,15 @@ export function chain(s: Scene, start: string | null | undefined, kind = "next")
   return out;
 }
 export const ptrTarget = (s: Scene, name: string) => s.pointers.find((p) => p.name === name)?.target;
+
+/** Entry labels of an STL scene in iteration order, "key=value" for maps (the "+N more" marker excluded). */
+export function stlItems(s: Scene): string[] {
+  return s.nodes.filter((n) => !n.id.endsWith(":more")).map((n) => (n.sub ? `${n.label}${n.sub.replace(/^→ /, "=")}` : n.label));
+}
+/** Index of the k-th step executing in the generated driver (setup statements), 0-based. */
+export function driverStep(l: Loaded, k: number): number {
+  const idx = l.history.steps.map((s, i) => (s.file === "driver" ? i : -1)).filter((i) => i >= 0);
+  return idx[k]!;
+}
+/** Last step at which main's locals are still alive: the final record is the `}` line *after* the destructors ran. */
+export const finalStep = (l: Loaded): number => l.history.length - 2;

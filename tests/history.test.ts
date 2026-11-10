@@ -11,7 +11,7 @@ function mk(n: number): Trace {
     if (i % 5 === 1) events.push({ type: "object_created", addr: "0x" + i, obj_type: "N", size: 16, fields: { v: i, next: { ptr: "0x0", kind: "null", to: "N" } } });
     if (i % 5 === 3 && i > 3) events.push({ type: "field_changed", addr: "0x" + (i - 2), field: "next", old: null, new: ptr("0x" + (i - 2)) });
     if (i === 17) events.push({ type: "object_freed", addr: "0x1" });
-    steps.push({ kind: "step", schema: 2, step: i, fn: "main", file: "main", line: i + 1, depth: 1, frames: [], events });
+    steps.push({ kind: "step", schema: 3, step: i, fn: "main", file: "main", line: i + 1, depth: 1, frames: [], events });
   }
   return { steps, end: null };
 }

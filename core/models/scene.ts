@@ -1,6 +1,6 @@
 /** Renderer-independent description of what to draw. Produced by adapters, consumed by the webview. */
 export type SceneKind = "array" | "heap" | "stack" | "queue" | "singly-linked-list" | "doubly-linked-list" | "binary-tree"
-  | "hash-table" | "graph" | "trie" | "generic";
+  | "hash-table" | "graph" | "trie" | "generic" | "map" | "set" | "sequence" | "unordered";
 
 export type NodeStatus = "live" | "freed" | "created" | "changed" | "unused";
 export interface SNode {

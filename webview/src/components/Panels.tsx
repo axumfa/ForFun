@@ -5,7 +5,7 @@ import type { Scene } from "../../../core/models/scene.ts";
 import { describeObject, describeValue, explainStep } from "../../../core/explain/explain.ts";
 import { analyzeSource } from "../../../core/analysis/static.ts";
 import { findings, observedCost, suggestions } from "../../../core/analysis/findings.ts";
-import { collectRoots, isArr, isPtr, isStruct } from "../../../core/adapters/analysis.ts";
+import { collectRoots, isArr, isPtr, isStl, isStruct } from "../../../core/adapters/analysis.ts";
 
 export function SourcePanel(p: { sources: Record<string, string>; file: FileKey; line: number; executed: { file: FileKey; line: number } | null }) {
   const [peek, setPeek] = useState<{ base: FileKey; file: string } | null>(null);
@@ -31,6 +31,7 @@ export function SourcePanel(p: { sources: Record<string, string>; file: FileKey;
 
 function ValueView({ v, objs }: { v: Value | undefined; objs: Record<string, HeapObject> }) {
   if (isArr(v)) return <span className="arrval">[{v.elems.slice(0, 16).map((e, i) => <span key={i}>{i ? ", " : ""}<ValueView v={e} objs={objs} /></span>)}{v.elems.length > 16 ? ", …" : ""}]{v.released ? " (released)" : ""}</span>;
+  if (isStl(v)) return <span className="arrval">std::{v.container}({v.size >= 0 ? v.size : "?"}) {"{"}{v.source === "raw" ? <i>{v.unavailable}</i> : v.entries.slice(0, 16).map((e, i) => <span key={i}>{i ? ", " : ""}{e.key !== undefined && <><ValueView v={e.key} objs={objs} /> → </>}<ValueView v={e.value} objs={objs} /></span>)}{v.entries.length > 16 || v.truncated ? ", …" : ""}{"}"}</span>;
   if (isStruct(v)) return <span>{"{"}{Object.entries(v.fields).map(([k, x], i) => <span key={k}>{i ? ", " : ""}{k}: <ValueView v={x} objs={objs} /></span>)}{"}"}</span>;
   if (isPtr(v)) return <span className={`pv ${v.kind}`}>{describeValue(v, objs)}</span>;
   return <span>{v === undefined || v === null ? "—" : String(v)}</span>;

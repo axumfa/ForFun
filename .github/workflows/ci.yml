@@ -31,6 +31,15 @@ jobs:
           node --version
           cat /proc/sys/kernel/yama/ptrace_scope || true
 
+      - name: libstdc++ GDB pretty-printers (M8 STL support reads containers through them)
+        run: |
+          printf '#include <map>\nint main() {\n  std::map<int, int> m{{1, 2}};\n  return (int)m.size() - 1;\n}\n' > /tmp/pp.cpp
+          g++ -g -O0 -o /tmp/pp /tmp/pp.cpp
+          gdb -q -batch -ex 'break 4' -ex run -ex 'info pretty-printer' -ex 'p m' /tmp/pp 2>&1 | grep -v '^$' || true
+          echo '--- auto-load scripts'; ls /usr/share/gdb/auto-load/usr/lib/*/ 2>&1 | head || true
+          echo '--- gcc python dir';   ls -d /usr/share/gcc*/python/libstdcxx 2>&1 || true
+          dpkg -l 2>/dev/null | grep -E 'libstdc\+\+6|libstdc\+\+-.*-dev' | awk '{print $2, $3}' || true
+
       - run: npm ci
       - run: npm run build
       - run: npm run typecheck

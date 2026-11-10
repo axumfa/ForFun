@@ -21,7 +21,7 @@ Run from the repo root unless noted. All verified on this machine (Node 22, GDB,
 - Interactive: open `extension/` in VS Code, F5 (Extension Development Host), right-click a `.cpp` -> "Visualize Code".
 
 ## Architecture map
-- `engine/debugger/gdb_tracer.py`: GDB-side script. Single-steps the debuggee, reads memory, writes trace JSONL (schema v2). Observations only, no inference.
+- `engine/debugger/gdb_tracer.py`: GDB-side script. Single-steps the debuggee, reads memory, writes trace JSONL (schema v3). Observations only, no inference.
 - `engine/runtime/shim.cpp`: `LD_PRELOAD` shim logging `operator new/delete` to an alloc log the tracer reads.
 - `core/`: pure TypeScript, no VS Code/Node-runtime coupling, shared by extension and webview.
   - `events/types.ts`: trace schema, `parseTrace`, `SCHEMA_VERSION` (see `docs/events.md`)

@@ -1,9 +1,10 @@
-import type { ArrayValue, PointerValue, StructValue, Value } from "../events/types.ts";
+import type { ArrayValue, PointerValue, StlValue, StructValue, Value } from "../events/types.ts";
 import type { HeapObject, RuntimeState } from "../snapshots/history.ts";
 
 export const isPtr = (v: Value | undefined): v is PointerValue => typeof v === "object" && v !== null && "ptr" in v;
 export const isArr = (v: Value | undefined): v is ArrayValue => typeof v === "object" && v !== null && "elems" in v && (v.kind === "array" || v.kind === "vector");
 export const isStruct = (v: Value | undefined): v is StructValue => typeof v === "object" && v !== null && "fields" in v && v.kind === "struct";
+export const isStl = (v: Value | undefined): v is StlValue => typeof v === "object" && v !== null && "kind" in v && v.kind === "stl";
 export const isScalar = (v: Value | undefined): v is number | string | boolean => typeof v === "number" || typeof v === "string" || typeof v === "boolean";
 
 /** "const struct Node *" -> "Node" */
