@@ -70,6 +70,7 @@ Known limitations are in [docs/limitations.md](docs/limitations.md); read it bef
 - M10: done (`.github/workflows/ci.yml`, see Commands > CI)
 - M11: stronger sandboxing (bwrap/seccomp)
 - M12: LLDB backend
+- Future (unscheduled): delta-encoded traces. Every step carries full `frames`, so trace size grows with container size (13.5 MB for the 1000-element `std::map` benchmark, 1606 steps, 200 entries read per step); store per-step diffs against the previous step instead.
 
 ## Rules for working in this repo
 - Run `npm run typecheck` and `npm test` before declaring anything done; report failures honestly with output.
