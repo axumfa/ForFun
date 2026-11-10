@@ -33,3 +33,19 @@ test("viewer renders a real trace through the adapters: stack, scene, freed poin
   assert.match(html, /class="node box created/);                       // newly allocated node is highlighted as created
   assert.match(html, /Singly linked list of Node/);
 });
+
+test("viewer: Logical | Internal switch renders, reflects the chosen view, and the internal view draws coloured tree nodes", async () => {
+  const Viewer = await loadViewer();
+  const r = await runTrace(path.join(root, "examples/stl/map.cpp"), cfg);
+  const idx = r.trace.steps.length - 2;
+  const render = (stlView?: Record<string, "logical" | "internal">) =>
+    renderToStaticMarkup(createElement(Viewer, { fileName: "map.cpp", sources: r.sources, trace: r.trace, programOutput: r.programOutput, initialStep: idx, stlView }));
+  const logical = render();
+  assert.match(logical, /<button class="on" aria-pressed="true"[^>]*>Logical<\/button>/);
+  assert.match(logical, /<button[^>]*aria-pressed="false"[^>]*>Internal<\/button>/);
+  assert.doesNotMatch(logical, /disabled=""/);
+  const internal = render({ m: "internal" });
+  assert.match(internal, /<button class="on" aria-pressed="true"[^>]*>Internal<\/button>/);
+  assert.match(internal, /class="node circle live black/);
+  assert.match(internal, /red-black tree/);
+});

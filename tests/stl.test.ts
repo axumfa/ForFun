@@ -115,3 +115,88 @@ test("the walk is validated: red-black links of the full tree agree with the ent
   const keys = v.entries.map((e) => e.key as number);
   assert.deepEqual(keys, [...keys].sort((a, b) => a - b));                            // in-order = sorted
 });
+
+// ---- internal view (red-black tree) ------------------------------------------------------------------------------------------------
+const INT = { stlView: { m: "internal", s: "internal", t: "internal", mm: "internal", ms: "internal", big: "internal" } } as const;
+const treeOf = (sc: { nodes: { id: string; label: string }[]; edges: { from: string; to: string; kind: string }[]; pointers: { name: string; target: string | null }[] }): string[] => {
+  const out: string[] = [], lab = new Map(sc.nodes.map((n) => [n.id, n.label]));
+  const kid = (id: string, k: string) => sc.edges.find((e) => e.from === id && e.kind === k)?.to;
+  const walk = (id: string | undefined | null) => { if (!id) return; walk(kid(id, "left")); out.push(lab.get(id)!); walk(kid(id, "right")); };
+  walk(sc.pointers.find((p) => p.name === "root")?.target);
+  return out;
+};
+
+test("internal view: drawn red-black tree in-order equals the program's output; root black; colours and links come from the nodes", async () => {
+  for (const [f, kind, label] of [["map", "map", "m"], ["set", "set", "s"]] as const) {
+    const l = await load(`stl/${f}.cpp`);
+    const { scenes } = scenesAt(l, finalStep(l), INT);
+    const sc = scenes.find((s) => s.title.includes(`std::${kind} ${label}`))!;
+    assert.equal(sc.kind, "binary-tree"); assert.equal(sc.views!.current, "internal"); assert.equal(sc.views!.internal, true);
+    assert.deepEqual(treeOf(sc), printed(l.output).map((p) => p.split(":")[0]!), f);
+    const root = sc.nodes.find((n) => n.id === sc.pointers.find((p) => p.name === "root")!.target)!;
+    assert.equal(root.fill, "black");
+    for (const e of sc.edges) {
+      const a = sc.nodes.find((n) => n.id === e.from)!, b = sc.nodes.find((n) => n.id === e.to)!;
+      assert.ok(!(a.fill === "red" && b.fill === "red"), "no red node has a red child");
+    }
+    assert.ok(sc.notes.some((n) => n.startsWith("Red-black properties hold")), f);
+  }
+});
+
+test("internal view, every step: unique ids, edges only between drawn nodes and only from observed links, same ids as the logical view", async () => {
+  for (const f of ["map", "set"]) {
+    const l = await load(`stl/${f}.cpp`);
+    for (let i = 0; i < l.history.length; i++) {
+      const lg = scenesAt(l, i).scenes, it = scenesAt(l, i, INT).scenes;
+      for (const sc of it.filter((s) => s.views)) {
+        const ids = sc.nodes.map((n) => n.id);
+        assert.equal(new Set(ids).size, ids.length, `${f}@${i}`);
+        const ref = collectStl(l.history.stateAt(i)).find((r) => r.id === sc.id)!;
+        const links = new Set<string>();
+        ref.v.entries.forEach((e, k) => { if (e.n) for (const c of [e.n[2], e.n[3]]) if (c >= 0) links.add(`${e.id}>${ref.v.entries[c]!.id}`); });
+        for (const e of sc.edges) assert.ok(links.has(`${e.from}>${e.to}`), `${f}@${i}: invented edge ${e.id}`);
+        assert.equal(sc.edges.length, links.size, `${f}@${i}: every observed link is drawn`);
+        const logicalIds = lg.find((s) => s.id === sc.id)!.nodes.map((n) => n.id).filter((x) => !x.endsWith(":more")).sort();
+        assert.deepEqual([...ids].sort(), logicalIds, `${f}@${i}: both views name the same nodes`);
+      }
+    }
+  }
+});
+
+test("internal view: rebalancing keeps node identities and flags the changed links / colours (ascending inserts force rotations)", async () => {
+  const l = await load("stl/map.cpp", "std::map<int, int> t;\nfor (int i = 1; i <= 15; i++) {\n  t.emplace(i, i);\n}\nint done = 1;");
+  let prevIds = new Set<string>(), sawChangedEdge = false, sawRecolor = false;
+  const idxs = l.history.steps.map((s, i) => (s.file === "driver" ? i : -1)).filter((i) => i >= 0);
+  for (const i of idxs) {
+    const sc = scenesAt(l, i, INT).scenes.find((s) => s.views?.key === "t");
+    if (!sc) continue;
+    const ids = new Set(sc.nodes.map((n) => n.id));
+    for (const id of prevIds) assert.ok(ids.has(id), `step ${i}: node ${id} vanished although nothing was erased`);
+    for (const e of sc.edges) if (e.changed && prevIds.has(e.from) && prevIds.has(e.to)) sawChangedEdge = true;
+    if (sc.nodes.some((n) => n.status === "changed")) sawRecolor = true;
+    prevIds = ids;
+  }
+  assert.equal(prevIds.size, 15);
+  assert.ok(sawChangedEdge, "a rotation re-links existing nodes: that edge is flagged changed, the nodes are not recreated");
+  assert.ok(sawRecolor, "recolouring is flagged on the same node");
+});
+
+test("internal view: multimap duplicates are separate tree nodes; truncated and custom-allocator containers refuse the internal view with the reason", async () => {
+  const mm = await load("stl/map.cpp", "std::multimap<int, int> mm;\nmm.insert({1, 10});\nmm.insert({1, 20});\nmm.insert({1, 30});\nint done = 1;");
+  const sc = scenesAt(mm, finalStep(mm), INT).scenes.find((s) => s.views?.key === "mm")!;
+  assert.equal(sc.views!.current, "internal"); assert.equal(sc.nodes.length, 3); assert.deepEqual(treeOf(sc), ["1", "1", "1"]);
+  const big = await load("stl/map.cpp", "std::map<int, int> big;\nfor (int i = 0; i < 300; i++) big.emplace_hint(big.end(), i, i);\nint done = 1;");
+  const b = scenesAt(big, finalStep(big), INT).scenes.find((s) => s.views?.key === "big")!;
+  assert.equal(b.views!.internal, false); assert.equal(b.views!.current, "logical", "asking for internal falls back to logical");
+  assert.match(b.views!.reason!, /300 elements/);
+  const ca = await load("stl/custom_alloc.cpp");
+  const c = scenesAt(ca, finalStep(ca), { stlView: { s: "internal" } }).scenes.find((s) => s.views)!;
+  assert.equal(c.views!.internal, false); assert.match(c.views!.reason!, /allocator/);
+});
+
+test("containers without an internal view (deque, unordered_map) show no Logical | Internal switch", async () => {
+  for (const f of ["deque", "unordered_map"]) {
+    const l = await load(`stl/${f}.cpp`);
+    for (const sc of scenesAt(l, finalStep(l), { stlView: { d: "internal", u: "internal" } }).scenes) assert.equal(sc.views, undefined, f);
+  }
+});

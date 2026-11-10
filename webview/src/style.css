@@ -51,3 +51,8 @@ button.link { background:none; border:0; color: var(--acc); cursor:pointer; padd
 .status.crashed, .status.error { color: var(--bad); } .status.stalled, .status.step_limit, .status.timeout { color: var(--warn); } .counter { opacity:.8; }
 @media (max-width: 900px) { .layout { grid-template-columns: 1fr; grid-template-rows: auto auto auto auto; height:auto; } .code { max-height: 220px; } }
 @media (prefers-reduced-motion: reduce) { .node { transition: none; } }
+
+.viewtoggle { display:inline-flex; border:1px solid var(--vscode-panel-border, #888); border-radius:4px; overflow:hidden; }
+.viewtoggle button { font-size:11px; padding:1px 8px; border:0; background:transparent; color:inherit; cursor:pointer; }
+.viewtoggle button.on { background: var(--vscode-button-background, #0e639c); color: var(--vscode-button-foreground, #fff); }
+.viewtoggle button:disabled { opacity:.45; cursor:not-allowed; }

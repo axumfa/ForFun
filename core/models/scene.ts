@@ -14,6 +14,7 @@ export interface SNode {
   doubleBorder?: boolean;         // e.g. trie end-of-word
   addr?: string;                  // heap address when the node is a heap object
   index?: number;                 // array index when the node is a cell
+  tip?: string;                   // hover text with the full content when the label had to be shortened
 }
 export type EdgeKind = "next" | "prev" | "left" | "right" | "child" | "ptr" | "edge" | "bucket";
 export interface SEdge { id: string; from: string; to: string; kind: EdgeKind; label?: string; changed?: boolean; directed: boolean; }
@@ -33,5 +34,7 @@ export interface Scene {
   markers: Marker[];              // index-like variables pointing at array cells
   width: number; height: number;
   notes: string[];
+  /** STL containers: which view this scene is, and whether the other one exists (UI shows a Logical | Internal switch). `key` = container name. */
+  views?: { key: string; current: "logical" | "internal"; internal: boolean; reason?: string };
 }
 export interface VisualizationState { step: number; scenes: Scene[]; }

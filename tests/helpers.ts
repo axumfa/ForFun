@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { runTrace, type RunnerConfig } from "../extension/src/execution/runner.ts";
 import { History, type RuntimeState } from "../core/snapshots/history.ts";
-import { interpret } from "../core/adapters/index.ts";
+import { interpret, type InterpretOptions } from "../core/adapters/index.ts";
 import type { Scene } from "../core/models/scene.ts";
 
 export const root = path.resolve(import.meta.dirname, "..");
@@ -29,9 +29,9 @@ export function stepAt(l: Loaded, marker: string, nth = 0): number {
   if (i < 0) throw new Error("line never executed: " + marker);
   return i;
 }
-export const scenesAt = (l: Loaded, i: number): { state: RuntimeState; scenes: Scene[] } => {
+export const scenesAt = (l: Loaded, i: number, opts?: InterpretOptions): { state: RuntimeState; scenes: Scene[] } => {
   const state = l.history.stateAt(i);
-  return { state, scenes: interpret(state).scenes };
+  return { state, scenes: interpret(state, undefined, opts).scenes };
 };
 export const outEdges = (s: Scene, id: string, kind: string) => s.edges.filter((e) => e.from === id && e.kind === kind);
 export function chain(s: Scene, start: string | null | undefined, kind = "next"): string[] {

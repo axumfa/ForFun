@@ -8,7 +8,8 @@ import { Controls } from "../timeline/Timeline.tsx";
 import { Inspector, Insights, SourcePanel, StepPanel, Variables } from "./Panels.tsx";
 
 type Tab = "step" | "vars" | "inspect" | "insights";
-export interface ViewerProps { fileName: string; sources: Record<string, string>; trace: Trace; programOutput: string; initialStep?: number; onStep?(file: FileKey, line: number): void; }
+export type StlView = Record<string, "logical" | "internal">;
+export interface ViewerProps { stlView?: StlView; onStlView?(key: string, mode: "logical" | "internal"): void; fileName: string; sources: Record<string, string>; trace: Trace; programOutput: string; initialStep?: number; onStep?(file: FileKey, line: number): void; }
 
 export function Viewer(p: ViewerProps) {
   const history = useMemo(() => new History(p.trace), [p.trace]);
@@ -16,7 +17,7 @@ export function Viewer(p: ViewerProps) {
   const [sel, setSel] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("step");
   const state = useMemo(() => (history.length ? history.stateAt(pb.index) : null), [history, pb.index]);
-  const scenes = useMemo(() => (state ? interpret(state).scenes : []), [state]);
+  const scenes = useMemo(() => (state ? interpret(state, undefined, { stlView: p.stlView }).scenes : []), [state, p.stlView]);
   const srcLines = useMemo(() => Object.fromEntries(Object.entries(p.sources).map(([k, v]) => [k, v.split("\n")])), [p.sources]);
   useEffect(() => { if (state) p.onStep?.(state.file, state.line); }, [state?.step]);        // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
@@ -34,7 +35,7 @@ export function Viewer(p: ViewerProps) {
       <SourcePanel sources={p.sources} file={state.file} line={state.line} executed={state.cause ? { file: state.cause.file, line: state.cause.line } : null} />
       <section className="center" aria-label="Data structures">
         {scenes.length === 0 && <p className="muted pad">No recognised data structure is alive at this step. Variables are in the right panel.</p>}
-        {scenes.map((s) => <SceneView key={s.id} scene={s} selected={sel} onSelect={pickNode} />)}
+        {scenes.map((s) => <SceneView key={s.id} scene={s} selected={sel} onSelect={pickNode} onView={p.onStlView} />)}
       </section>
       <aside className="side" aria-label="State">
         <nav className="tabs">{(["step", "vars", "inspect", "insights"] as Tab[]).map((t) => <button key={t} className={tab === t ? "on" : ""} onClick={() => setTab(t)}>{{ step: "Step", vars: "Variables", inspect: "Inspector", insights: "Insights" }[t]}</button>)}</nav>
