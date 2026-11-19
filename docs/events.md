@@ -39,4 +39,4 @@ ever see full frames. `DSV_NO_DELTA=1` makes the tracer write full frames (used 
 Freed objects keep their last known contents in `History` (shown dashed, only while something still points at them).
 
 ## Versioning
-Breaking changes bump `SCHEMA_VERSION`; there is no silent compatibility. v1 and v2 traces are rejected (v3 added the `StlValue` variant).
+Breaking changes bump `SCHEMA_VERSION`; there is no silent compatibility. v1-v3 traces are rejected (v3 added the `StlValue` variant, v4 the frame deltas).
