@@ -8,7 +8,7 @@ import { findings } from "../core/analysis/findings.ts";
 const printed = (o: string) => o.trim().split(/\s+/);
 
 test("INVARIANT: every drawn heap edge exists in the observed pointer data (all examples, all steps)", async () => {
-  const files = ["linked-lists/list.cpp", "linked-lists/singly.cpp", "linked-lists/malloc_list.cpp", "linked-lists/doubly.cpp", "linked-lists/sentinel.cpp", "linked-lists/globals.cpp", "linked-lists/shared_ptr_list.cpp", "binary-trees/unique_ptr_tree.cpp", "binary-trees/shared_tree.cpp", "graphs/dfs_ptr.cpp", "arrays/union_find.cpp", "binary-trees/bst.cpp", "binary-trees/avl.cpp", "binary-trees/rbtree.cpp",
+  const files = ["linked-lists/list.cpp", "linked-lists/singly.cpp", "linked-lists/malloc_list.cpp", "linked-lists/doubly.cpp", "linked-lists/sentinel.cpp", "linked-lists/globals.cpp", "arrays/heap_arrays.cpp", "linked-lists/shared_ptr_list.cpp", "binary-trees/unique_ptr_tree.cpp", "binary-trees/shared_tree.cpp", "graphs/dfs_ptr.cpp", "arrays/union_find.cpp", "binary-trees/bst.cpp", "binary-trees/avl.cpp", "binary-trees/rbtree.cpp",
     "hash-tables/chained.cpp", "tries/trie.cpp", "stacks-queues/stack_queue.cpp",
     "stl/map.cpp", "stl/adapters.cpp", "stl/ptr_map.cpp", "stl/set.cpp", "stl/list.cpp", "stl/deque.cpp", "stl/unordered_map.cpp", "stl/custom_alloc.cpp",
     "c/singly.c", "c/bst.c", "c/dynarray.c", "c/hash.c"];
@@ -309,4 +309,18 @@ test("globals: a change to a global is an observed event and is explained; globa
   }
   assert.ok(texts.some((t) => /Variable 'count' changed from 0 to 1/.test(t)), texts.join("\n"));
   assert.ok(texts.some((t) => /Variable 'head' changed/.test(t)));
+});
+
+test("heap arrays are named after their owner (a, s.data), carry the index markers of the running function, and the sorted array equals the output", async () => {
+  const l = await load("arrays/heap_arrays.cpp");
+  const mid = stepAt(l, "int t = a[i]; a[i] = a[hi]; a[hi] = t;");
+  const sc = scenesAt(l, mid).scenes;
+  const a = sc.find((s) => s.title.includes("a → int[6]"))!;
+  assert.ok(a, sc.map((s) => s.title).join(" | "));
+  assert.ok(sc.some((s) => s.title.includes("s.data → int[")), "member pointer s.data names its array");
+  assert.ok(!sc.some((s) => /int\[\d\] @0x/.test(s.title)), "no array is left named by address only");
+  const names = a.markers.map((m) => m.name);
+  assert.ok(["i", "lo", "hi"].every((n) => names.includes(n)), `markers ${names.join(",")}`);
+  const end = scenesAt(l, stepAt(l, "for (int i = 0; i < 6; i++) std::printf")).scenes.find((s) => s.title.includes("a → int[6]"))!;
+  assert.deepEqual(end.nodes.map((n) => n.label), printed(l.output));
 });

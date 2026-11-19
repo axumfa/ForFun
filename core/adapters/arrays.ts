@@ -2,7 +2,7 @@ import type { ArrayValue, Value } from "../events/types.ts";
 import type { RuntimeState } from "../snapshots/history.ts";
 import type { Scene, SNode } from "../models/scene.ts";
 import type { Claims, DataStructureAdapter } from "./types.ts";
-import { analyzeNodeTypes, isArr, isPtr, isScalar, isStruct, normType, show, target } from "./analysis.ts";
+import { analyzeNodeTypes, collectRoots, isArr, isPtr, isScalar, isStruct, normType, show, target } from "./analysis.ts";
 import { classify, edgeId, mkNode } from "./nodes.ts";
 import { layoutCircle, layoutTree } from "./layout.ts";
 import { fit, newScene } from "./scene-util.ts";
@@ -33,10 +33,13 @@ export function collectArrays(src: Src): ArrayRef[] {
     for (const [k, v] of Object.entries(f.locals)) walk(k, v, undefined, {}, 0);
     void fi;
   });
+  // A heap array is named after the variable that owns it (outermost frame wins: `a`, `s.data`), else by type and address.
+  const owner = new Map<string, string>();
+  for (const r of collectRoots(src)) if (r.ptr.kind === "object" && r.ptr.obj && !r.ptr.offset) owner.set(r.ptr.obj, r.name.replace(/@\w+(?=\.|$)/, ""));
   for (const o of Object.values(src.objects)) {
     if (o.state !== "LIVE") continue;
     const t = o.type.replace(/\[\]$/, "");
-    if (o.elems) add(`arr:${o.addr}`, `${t}[${o.elems.length}] @${o.addr}`, { kind: "array", elemType: t, elems: o.elems }, undefined, {});
+    if (o.elems) add(`arr:${o.addr}`, owner.has(o.addr) ? `${owner.get(o.addr)} → ${t}[${o.elems.length}]` : `${t}[${o.elems.length}] @${o.addr}`, { kind: "array", elemType: t, elems: o.elems }, undefined, {});
     for (const [k, v] of Object.entries(o.fields ?? {})) if (isArr(v)) add(v.addr ? `arr:${v.addr}` : `arr:${o.addr}.${k}`, `${t}@${o.addr}.${k}`, v, t, o.fields!, o.addr);
   }
   return [...refs.values()];

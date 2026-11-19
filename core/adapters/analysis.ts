@@ -17,7 +17,7 @@ export const baseType = (o: HeapObject): string => normType(o.type.replace(/\[\]
 export interface NamedPtr { name: string; ptr: PointerValue; }
 
 /** Every pointer reachable by *name* from the stack: locals, struct-local members, array elements of locals. */
-export function collectRoots(state: RuntimeState): NamedPtr[] {
+export function collectRoots(state: Pick<RuntimeState, "frames">): NamedPtr[] {
   const out: NamedPtr[] = [];
   const nameCount = new Map<string, number>();
   state.frames.forEach((f) => Object.keys(f.locals).forEach((k) => nameCount.set(k, (nameCount.get(k) ?? 0) + 1)));
