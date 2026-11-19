@@ -214,6 +214,49 @@ def walk_list(v, size, cap):
     if size <= cap and (cur != hdr or len(order) != size): raise Unavailable("list has %d reachable nodes but size() is %d" % (len(order), size))
     return hdr, order
 
+MAX_BUCKETS = 2048
+def walk_hash(v, size, cap):
+    """unordered_*: the nodes form ONE singly linked list (`_M_before_begin._M_nxt`, then `_M_nxt` ...); `_M_buckets[j]` points at the node *before* the first node of bucket j
+    (`&_M_before_begin` for the first node). Bucket membership therefore follows from observed memory alone (no hash function needed).
+    Returns (nodes in chain order, [per bucket: index of its first node in that order, or -1])."""
+    h = v["_M_h"]; lay, sz = base_layout("std::__detail::_Hash_node_base", ["_M_nxt"])
+    if size > cap: raise Unavailable("%d elements: the internal view needs at most %d" % (size, cap))
+    bc = int(h["_M_bucket_count"])
+    if bc < 1 or bc > MAX_BUCKETS: raise Unavailable("%d buckets: the internal view needs 1..%d" % (bc, MAX_BUCKETS))
+    hdr = int(h["_M_before_begin"].address); nxt = lambda a: int_field(mem(a, sz), lay, "_M_nxt")
+    order = []; cur = nxt(hdr)
+    while cur and len(order) <= size:
+        live_node(cur); order.append(cur); cur = nxt(cur)
+    if cur != 0 or len(order) != size: raise Unavailable("node chain has %d reachable nodes but size() is %d" % (len(order), size))
+    idx = {a: i for i, a in enumerate(order)}
+    raw = mem(int(h["_M_buckets"]), 8 * bc); ptrs = [int.from_bytes(raw[8 * j:8 * j + 8], sys.byteorder) for j in range(bc)]
+    buckets = [-1] * bc; seen = set()
+    for j, p in enumerate(ptrs):
+        if p == 0: continue
+        first = 0 if p == hdr else idx[p] + 1 if p in idx else None
+        if first is None or first >= size: raise Unavailable("bucket %d does not point into the node chain" % j)
+        if first in seen: raise Unavailable("two buckets start at the same node")
+        seen.add(first); buckets[j] = first
+    if size and 0 not in seen: raise Unavailable("the first node belongs to no bucket")
+    return order, buckets
+
+def attach_hash(v, t, maplike, size, r, kids):
+    """Adds node ids + the bucket table to an unordered_* value whose entries were read through the printer (same order as the node chain: cross-checked by count and address)."""
+    try:
+        if size > MAX_STL: raise Unavailable("%d elements: the internal view needs at most %d" % (size, MAX_STL))
+        if not str(t.template_argument(4 if maplike else 3)).startswith("std::allocator<"): raise Unavailable("allocator is not std::allocator")
+        if len(r["entries"]) != size: raise Unavailable("pretty-printer yielded %d entries for size() %d" % (len(r["entries"]), size))
+        order, buckets = walk_hash(v, size, MAX_STL)
+        for n, (k, x) in zip(order, kids):
+            for c in (k, x):
+                try: a = int(c.address)
+                except Exception: continue
+                if not (n <= a < n + allocs[n]["size"]): raise Unavailable("node walk disagrees with the pretty-printer")
+        for e, n in zip(r["entries"], order): e["id"] = hx(n)
+        r["internal"] = {"kind": "hash", "buckets": buckets}; r["source"] = "walk"
+    except (Unavailable, NotTracked) as e: r["internal"] = None; r["internalError"] = str(e)
+    except gdb.error as e: r["internal"] = None; r["internalError"] = "walk failed: %s" % e
+
 def printer_size(vis):
     try:
         txt = str(vis.to_string()); m = re.search(r"with (\d+) element", txt)
@@ -302,8 +345,10 @@ def read_stl(v, t, kind, objs, depth):
             r["internal"] = None; r["internalError"] = "walk failed: %s" % e
     if vis is not None:                                  # --- printer (identity = key / position) ---
         try:
-            r["entries"] = [entry(kv, objs, depth, maplike) for kv in lazy_children(vis, maplike, MAX_STL)]
+            kids = lazy_children(vis, maplike, MAX_STL)
+            r["entries"] = [entry(kv, objs, depth, maplike) for kv in kids]
             r["source"] = "printer"
+            if kind.startswith("unordered") and size is not None: attach_hash(v, t, maplike, size, r, kids)
             if size is None: r["size"] = len(r["entries"])
             return r
         except Exception as e: why = "pretty-printer failed: %s" % e

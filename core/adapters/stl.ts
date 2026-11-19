@@ -94,8 +94,8 @@ export function logicalScene(ref: StlRef, prev: StlRef | undefined): Scene {
 }
 
 /** Which internal views exist. Only containers that have a node walk offer the switch; it is disabled (with the reason) when the walk was refused or truncated. */
-const WALKABLE = new Set(["map", "multimap", "set", "multiset", "list"]);
-const hasInternal = (v: StlValue) => v.internal?.kind === "rb" || v.internal?.kind === "list";
+const WALKABLE = new Set(["map", "multimap", "set", "multiset", "list", "unordered_map", "unordered_multimap", "unordered_set", "unordered_multiset"]);
+const hasInternal = (v: StlValue) => v.internal?.kind === "rb" || v.internal?.kind === "list" || v.internal?.kind === "hash";
 function viewsOf(ref: StlRef, current: "logical" | "internal"): Scene["views"] {
   const v = ref.v;
   if (!WALKABLE.has(v.container) || v.source === "raw") return undefined;
@@ -183,9 +183,52 @@ function listScene(ref: StlRef, prev: StlRef | undefined): Scene {
   fit(s); return s;
 }
 
+const MAX_BUCKET_ROWS = 48;
+/**
+ * Internal view of unordered_*: the bucket table and the node chains. libstdc++ keeps ALL nodes in one singly linked list; `_M_buckets[j]` points at the node *before*
+ * bucket j's first node, so bucket membership is read from memory (validated by the tracer), not recomputed from a hash. Drawn: bucket j -> its first node, and `_M_nxt`
+ * between consecutive nodes of the same bucket (the last node's `_M_nxt` really points on into the next non-empty bucket's first node; that cross-bucket link is not drawn).
+ */
+function hashScene(ref: StlRef, prev: StlRef | undefined): Scene {
+  const v = ref.v, maplike = v.container.endsWith("map"), ids = entryIds(ref.id, v), buckets = (v.internal as { buckets: number[] }).buckets;
+  const s = newScene(ref.id, "hash-table", `std::${v.container} ${ref.label} — ${buckets.length} buckets, ${v.size} element${v.size === 1 ? "" : "s"}`, 1,
+    "bucket table (_M_buckets) and node chain (_M_nxt) read from memory and validated against size() and the pretty-printer");
+  s.views = viewsOf(ref, "internal");
+  const pv = prev && prev.v.internal?.kind === "hash" ? prev : undefined;
+  const was = pv ? new Map(entryIds(pv.id, pv.v).map((id, i) => [id, pv.v.entries[i]!] as const)) : null;
+  const starts = buckets.map((first, j) => [first, j] as const).filter(([f]) => f >= 0).sort((a, b) => a[0] - b[0]);
+  const bucketOf = (i: number) => { let b = -1; for (const [f, j] of starts) { if (f <= i) b = j; else break; } return b; };
+  const rows = buckets.length <= MAX_BUCKET_ROWS ? buckets.map((_, j) => j) : starts.map(([, j]) => j).sort((a, b) => a - b);
+  const rowOf = new Map(rows.map((j, r) => [j, r]));
+  const oldEdges = new Set<string>();
+  if (pv) { const pids = entryIds(pv.id, pv.v), pb = (pv.v.internal as { buckets: number[] }).buckets;
+    const ps = pb.map((f, j) => [f, j] as const).filter(([f]) => f >= 0);
+    pb.forEach((f, j) => { if (f >= 0) oldEdges.add(edgeId(`${s.id}[${j}]`, "bucket", pids[f]!)); });
+    pids.forEach((id, i) => { if (i + 1 < pids.length && !ps.some(([f]) => f === i + 1)) oldEdges.add(edgeId(id, "next", pids[i + 1]!)); }); }
+  for (const j of rows) {
+    const first = buckets[j]!;
+    s.nodes.push({ id: `${s.id}[${j}]`, label: String(j), sub: first < 0 ? "∅" : undefined, x: 40, y: 30 + rowOf.get(j)! * 60, w: 48, h: 40, shape: "cell", status: "live", index: j });
+  }
+  const col = new Map<number, number>();
+  v.entries.forEach((e, i) => {
+    const j = bucketOf(i), c = col.get(j) ?? 0; col.set(j, c + 1);
+    const pe = was?.get(ids[i]!), main = maplike ? compact(e.key) : compact(e.value), sub = maplike ? `→ ${compact(e.value)}` : undefined;
+    s.nodes.push({ id: ids[i]!, label: clip(main, 10), sub: sub ? clip(sub, 10) : undefined, x: 130 + c * 100, y: 30 + (rowOf.get(j) ?? 0) * 60, w: 84, h: 40, shape: "box", index: i,
+      tip: `${main}${sub ? " " + sub : ""} @${ids[i]}`,
+      status: !was ? "live" : !pe ? "created" : JSON.stringify(pe.value) !== JSON.stringify(e.value) || JSON.stringify(pe.key) !== JSON.stringify(e.key) ? "changed" : "live" });
+    const first = buckets[j] === i, from = first ? `${s.id}[${j}]` : ids[i - 1]!, kind = first ? "bucket" : "next";
+    if (j >= 0) { const id = edgeId(from, kind, ids[i]!); s.edges.push({ id, from, to: ids[i]!, kind, directed: true, changed: !!pv && !oldEdges.has(id) }); }
+  });
+  s.pointers = [];
+  if (buckets.length > MAX_BUCKET_ROWS) s.notes.push(`${buckets.length} buckets: only the ${rows.length} non-empty ones are drawn.`);
+  s.notes.push("Chains: the bucket points at the node before its first node in libstdc++'s single node list; drawn as bucket → first node. The last node of a chain links on into the next non-empty bucket (not drawn).");
+  fit(s); return s;
+}
+
 /** Internal view of whichever kind the walk validated. */
 export function internalScene(ref: StlRef, prev: StlRef | undefined): Scene {
-  return ref.v.internal?.kind === "list" ? listScene(ref, prev) : rbScene(ref, prev);
+  const k = ref.v.internal?.kind;
+  return k === "list" ? listScene(ref, prev) : k === "hash" ? hashScene(ref, prev) : rbScene(ref, prev);
 }
 
 export const stlAdapter: DataStructureAdapter = {

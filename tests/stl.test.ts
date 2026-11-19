@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { load, scenesAt, stepAt, stlItems, driverStep, finalStep } from "./helpers.ts";
-import { collectStl } from "../core/adapters/stl.ts";
+import { collectStl, compact } from "../core/adapters/stl.ts";
+import { interpret } from "../core/adapters/index.ts";
 import type { StlValue } from "../core/events/types.ts";
 
 const printed = (o: string) => o.trim().split(/\s+/);
@@ -194,11 +195,9 @@ test("internal view: multimap duplicates are separate tree nodes; truncated and 
   assert.equal(c.views!.internal, false); assert.match(c.views!.reason!, /allocator/);
 });
 
-test("containers without an internal view (deque, unordered_map) show no Logical | Internal switch", async () => {
-  for (const f of ["deque", "unordered_map"]) {
-    const l = await load(`stl/${f}.cpp`);
-    for (const sc of scenesAt(l, finalStep(l), { stlView: { d: "internal", u: "internal" } }).scenes) assert.equal(sc.views, undefined, f);
-  }
+test("deque has no internal view: no Logical | Internal switch", async () => {
+  const l = await load("stl/deque.cpp");
+  for (const sc of scenesAt(l, finalStep(l), { stlView: { d: "internal" } }).scenes) assert.equal(sc.views, undefined);
 });
 
 // ---- internal view (std::list) -----------------------------------------------------------------------------------------------------
@@ -276,4 +275,71 @@ test("delta frames: decoded steps are identical to a trace written without delta
     for (let i = 0; i < a.trace.steps.length; i++) assert.deepEqual(a.trace.steps[i]!.frames, b.trace.steps[i]!.frames, `${f}@${i}`);
     if (setup) assert.ok(a.traceBytes * 4 < b.traceBytes, `${f}: delta ${a.traceBytes} vs full ${b.traceBytes}`);
   }
+});
+
+// ---- internal view (unordered_*: bucket table + node chains) ---------------------------------------------------------------------------
+const HSETUP = "std::unordered_map<int, int> h;\nfor (int i = 0; i < 40; i++) h[i * 7] = i;\nh.erase(14);\nh.erase(70);\nstd::unordered_set<int> hs = {3, 4, 5, 100, 200};\nint done = 1;";
+const HINT = { stlView: { h: "internal", hs: "internal" } } as const;
+
+test("unordered internal view: every node is in the bucket key % bucket_count (std::hash<int> is the identity); order and ids are consistent at every step", async () => {
+  const l = await load("stl/unordered_map.cpp", HSETUP);
+  let seenInternal = 0;
+  for (let i = 0; i < l.history.length; i++) {
+    const st = l.history.stateAt(i);
+    for (const r of collectStl(st)) {
+      const v = r.v; if (v.internal?.kind !== "hash") continue;
+      seenInternal++;
+      const bk = v.internal.buckets, bc = v.bucketCount!;
+      assert.equal(bk.length, bc, `@${i}`);
+      const starts = bk.map((f, j) => [f, j] as const).filter(([f]) => f >= 0).sort((a, b) => a[0] - b[0]);
+      v.entries.forEach((e, k) => {
+        const j = [...starts].reverse().find(([f]) => f <= k)![1], key = Number(typeof e.key === "number" ? e.key : e.value);
+        assert.equal(key % bc, j, `@${i}: key ${key} must live in bucket ${key % bc}, the tracer put it in ${j}`);
+        assert.ok(e.id, "node id");
+      });
+      assert.equal(new Set(v.entries.map((e) => e.id)).size, v.entries.length);
+    }
+    for (const sc of interpret(st, undefined, HINT).scenes.filter((x) => x.views?.current === "internal" && x.kind === "hash-table")) {
+      const ids = new Set(sc.nodes.map((n) => n.id));
+      for (const e of sc.edges) assert.ok(ids.has(e.from) && ids.has(e.to), `@${i}: dangling edge ${e.id}`);
+    }
+  }
+  assert.ok(seenInternal > 30, "internal view existed for most steps");
+});
+
+test("unordered internal view at the end: drawn chains hold exactly the container's elements; bucket cells point at the first node of their chain", async () => {
+  const l = await load("stl/unordered_map.cpp", HSETUP);
+  const end = Array.from({ length: l.history.length }, (_, i) => i).find((i) => { const rs = collectStl(l.history.stateAt(i)); return rs.some((r) => r.label === "h" && r.v.size === 38) && rs.some((r) => r.label === "hs" && r.v.size === 5); })!;
+  assert.ok(end > 0);
+  const sc = scenesAt(l, end, HINT).scenes.find((s) => s.views?.key === "h")!;
+  assert.equal(sc.kind, "hash-table"); assert.equal(sc.views!.current, "internal");
+  const vals = sc.nodes.filter((n) => n.shape === "box").map((n) => Number(n.label)).sort((a, b) => a - b);
+  assert.deepEqual(vals, Array.from({ length: 40 }, (_, i) => i * 7).filter((k) => k !== 14 && k !== 70));
+  for (const e of sc.edges.filter((x) => x.kind === "bucket")) assert.equal(sc.nodes.find((n) => n.id === e.to)!.y, sc.nodes.find((n) => n.id === e.from)!.y, "same row");
+  for (const e of sc.edges.filter((x) => x.kind === "next")) assert.equal(sc.nodes.find((n) => n.id === e.to)!.y, sc.nodes.find((n) => n.id === e.from)!.y, "chain stays in its bucket row");
+  assert.equal(sc.edges.length, vals.length, "one incoming edge per node (bucket or previous node)");
+  const hs = scenesAt(l, end, HINT).scenes.find((s) => s.views?.key === "hs")!;
+  assert.deepEqual(hs.nodes.filter((n) => n.shape === "box").map((n) => Number(n.label)).sort((a, b) => a - b), [3, 4, 5, 100, 200]);
+});
+
+test("unordered identity: a rehash keeps node ids (nodes are not reallocated); only the new element is 'created'", async () => {
+  const l = await load("stl/unordered_map.cpp", HSETUP);
+  const before = new Map<string, string>();
+  let rehashes = 0, prevBc = 0;
+  for (let i = 0; i < l.history.length; i++) {
+    const r = collectStl(l.history.stateAt(i)).find((x) => x.label === "h" && x.v.internal?.kind === "hash");
+    if (!r) continue;
+    if (prevBc && r.v.bucketCount !== prevBc) {
+      rehashes++;
+      for (const e of r.v.entries) { const k = compact(e.key); if (before.has(k)) assert.equal(e.id, before.get(k), `key ${k} moved on rehash`); }
+    }
+    prevBc = r.v.bucketCount!; before.clear(); for (const e of r.v.entries) before.set(compact(e.key), e.id!);
+  }
+  assert.ok(rehashes >= 2, `inserting 40 elements rehashes at least twice (saw ${rehashes})`);
+});
+
+test("unordered internal view is refused for a custom allocator or a truncated container, with the reason; logical view still works", async () => {
+  const big = await load("stl/unordered_map.cpp", "std::unordered_set<int> h;\nfor (int i = 0; i < 300; i++) h.insert(i);\nint done = 1;");
+  const sc = scenesAt(big, finalStep(big), HINT).scenes.find((s) => s.views?.key === "h")!;
+  assert.equal(sc.views!.internal, false); assert.equal(sc.views!.current, "logical"); assert.match(sc.views!.reason!, /300 elements/);
 });

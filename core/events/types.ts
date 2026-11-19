@@ -26,7 +26,7 @@ export interface StlValue {
   kind: "stl"; container: StlContainer; type: string; size: number; truncated: boolean; entries: StlEntry[];
   source: "printer" | "walk" | "raw"; addr?: string; keyType?: string; valType?: string;
   bucketCount?: number; text?: string; unavailable?: string;
-  internal?: { kind: "rb"; header: string; root: number } | { kind: "list"; header: string } | null; internalError?: string;
+  internal?: { kind: "rb"; header: string; root: number } | { kind: "list"; header: string } | { kind: "hash"; buckets: number[] } | null; internalError?: string;
 }
 export type Value = number | string | boolean | PointerValue | ArrayValue | StructValue | StlValue | null;
 

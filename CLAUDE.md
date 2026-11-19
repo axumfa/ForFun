@@ -11,7 +11,7 @@ Run from the repo root unless noted. All verified on this machine (Node 22, GDB,
 - Install: `npm ci` (npm workspaces: `extension`, `webview`)
 - Build: `npm run build` (esbuild -> `extension/dist/{extension.js,webview.js,webview.css}`, copies `engine/` to `extension/engine/`)
 - Typecheck: `npm run typecheck` (`tsc -p core && tsc -p extension && tsc -p webview`)
-- Test: `npm test` (`node --experimental-strip-types --test tests/*.test.ts`; 92 tests, ~40 s; needs `g++` and `gdb` because tests really compile and trace the examples)
+- Test: `npm test` (`node --experimental-strip-types --test tests/*.test.ts`; 96 tests, ~45 s; needs `g++` and `gdb` because tests really compile and trace the examples)
 - Package the .vsix: `npm run build && npm run package -w extension -- -o ../dsv.vsix` (`@vscode/vsce` devDependency of `extension/`; script `vsce package --no-dependencies`).
   `*.vsix` is gitignored (not tracked).
 - Trace a file and print the scenes: `npm run trace -- examples/binary-trees/bst.cpp [step|last] [--json]` (no arg: step count + program output).
@@ -66,7 +66,7 @@ Known limitations are in [docs/limitations.md](docs/limitations.md); read it bef
 
 ## Roadmap (in order)
 - M7: done (malloc family tracking, see D14); remaining: nothing
-- M8: STL adapters: logical views done; Internal view done for map/set/multi*/list; remaining: `unordered_*`/`deque` internal views, edges from container elements to pointees
+- M8: STL adapters: logical views done; Internal view done for map/set/multi*/list/unordered_*; remaining: `deque` internal view, edges from container elements to pointees
 - M9: per-write tracking (watchpoints on the active structure)
 - M10: done (`.github/workflows/ci.yml`, see Commands > CI)
 - M11: bwrap sandbox for the traced run done (`dsv.sandbox`, `bwrapArgs` in runner.ts); remaining: seccomp filter, sandboxed compile step
