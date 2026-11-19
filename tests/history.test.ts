@@ -11,7 +11,7 @@ function mk(n: number): Trace {
     if (i % 5 === 1) events.push({ type: "object_created", addr: "0x" + i, obj_type: "N", size: 16, fields: { v: i, next: { ptr: "0x0", kind: "null", to: "N" } } });
     if (i % 5 === 3 && i > 3) events.push({ type: "field_changed", addr: "0x" + (i - 2), field: "next", old: null, new: ptr("0x" + (i - 2)) });
     if (i === 17) events.push({ type: "object_freed", addr: "0x1" });
-    steps.push({ kind: "step", schema: 3, step: i, fn: "main", file: "main", line: i + 1, depth: 1, frames: [], events });
+    steps.push({ kind: "step", schema: 4, step: i, fn: "main", file: "main", line: i + 1, depth: 1, frames: [], events });
   }
   return { steps, end: null };
 }
@@ -42,4 +42,33 @@ test("events are attributed to the previous step's line; freed objects keep last
 
 test("out of range is an error, not a guess", () => {
   assert.throws(() => new History(mk(3)).stateAt(3), RangeError);
+});
+
+// ---- schema v4 frame deltas ---------------------------------------------------------------------------------------------------------
+import { applyPatch, expandFrames, parseTrace, type Frame, type WireFrame, type Value } from "../core/events/types.ts";
+
+test("applyPatch: list/dict patches, removals, growth, shrink; unchanged children keep their reference", () => {
+  const keep = { x: 1 };
+  const old = { kind: "vector", elems: [1, 2, 3, keep], cap: 4 } as unknown as Value;
+  const p = { $o: { elems: { $l: 5, $o: { "1": 9, "4": 7 } }, cap: 8 } } as unknown as Value;
+  const n = applyPatch(old, p) as unknown as { elems: unknown[]; cap: number };
+  assert.deepEqual(n.elems, [1, 9, 3, keep, 7]); assert.equal(n.cap, 8); assert.equal(n.elems[3], keep);
+  assert.deepEqual(applyPatch({ a: 1, b: 2 } as unknown as Value, { $o: {}, $x: ["a"] } as unknown as Value), { b: 2 });
+  assert.deepEqual(applyPatch([1, 2, 3] as unknown as Value, { $l: 2, $o: {} } as unknown as Value), [1, 2]);
+  assert.equal(applyPatch(5, 6), 6);
+});
+
+test("expandFrames: delta against the same depth from the outermost frame; keys control order; mismatch throws", () => {
+  const prev: Frame[] = [{ fn: "f", file: "main", line: 3, locals: { a: 1, b: 2 } }, { fn: "main", file: "main", line: 9, locals: { x: 5 } }];
+  const wire: WireFrame[] = [{ fn: "f", file: "main", line: 4, d: 1, locals: { b: 7, c: 1 }, keys: ["c", "a", "b"] }, { fn: "main", file: "main", line: 9, d: 1, locals: {} }];
+  const out = expandFrames(wire, prev);
+  assert.deepEqual(Object.keys(out[0]!.locals), ["c", "a", "b"]); assert.deepEqual(out[0]!.locals, { c: 1, a: 1, b: 7 });
+  assert.equal(out[1]!.locals.x, 5); assert.equal(out[0]!.line, 4);
+  assert.throws(() => expandFrames([{ fn: "g", file: "main", line: 1, d: 1, locals: {} }], prev), /delta frame/);
+  const deeper = expandFrames([{ fn: "g", file: "main", line: 1, locals: { q: 1 } }, ...wire], prev);   // a new inner call: outer frames still line up
+  assert.equal(deeper.length, 3); assert.deepEqual(deeper[1]!.locals, { c: 1, a: 1, b: 7 });
+});
+
+test("parseTrace rejects the previous schema", () => {
+  assert.throws(() => parseTrace('{"kind":"step","schema":3,"step":0,"fn":"main","file":"main","line":1,"depth":1,"frames":[],"events":[]}'), /unsupported schema/);
 });

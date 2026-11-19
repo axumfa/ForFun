@@ -1,5 +1,5 @@
-# Trace schema v3
-Source of truth: `core/events/types.ts` (`SCHEMA_VERSION = 3`). The engine writes JSONL, every record carries `"schema": 3`; `parseTrace` rejects
+# Trace schema v4
+Source of truth: `core/events/types.ts` (`SCHEMA_VERSION = 4`). The engine writes JSONL, every record carries `"schema": 4`; `parseTrace` rejects
 other versions and unknown kinds (a truncated *last* line, from a killed run, is tolerated).
 
 ## Records
@@ -7,6 +7,15 @@ other versions and unknown kinds (a truncated *last* line, from a killed run, is
   `events` are the effects of the **previous** step's line (`History` exposes that line as `cause`).
 - `end`: `{reason: exited|step_limit|error|crashed|stalled|timeout, exitCode, message?, signal?, line?, doubleFrees?}` — always last
   (synthesised as `timeout` by the runner if the process was killed).
+
+## Frame deltas (v4)
+On the wire a frame may be a delta against the frame at the same depth *counted from the outermost* frame in the previous step (same `fn` and `file`):
+`{fn, file, line, d: 1, locals: {only new or changed}, keys?: [all names in order, present only when the set/order changed]}`. A container-valued local
+(array/vector/struct/stl) that changed is sent as a structural patch when that is smaller: `{$o: {key|index: value-or-patch}, $l?: newLength, $x?: [removedKeys]}`
+(`$` cannot occur in a C++ identifier, so a patch is never confused with a value; anything without `$o`/`$l` replaces the old value). `parseTrace` expands every
+step to full frames (`expandFrames`/`applyPatch` in `core/events/types.ts`), sharing unchanged values by reference, so `History`, the adapters and the webview only
+ever see full frames. `DSV_NO_DELTA=1` makes the tracer write full frames (used by a differential test). Effect: the 1000-element `std::map` benchmark went 8.4 MB -> 0.8 MB.
+`events` (heap changes) were already diffs and are unchanged.
 
 ## Values
 `number | string | boolean | null | PointerValue | ArrayValue | StructValue | StlValue`

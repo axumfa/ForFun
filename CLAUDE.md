@@ -11,7 +11,7 @@ Run from the repo root unless noted. All verified on this machine (Node 22, GDB,
 - Install: `npm ci` (npm workspaces: `extension`, `webview`)
 - Build: `npm run build` (esbuild -> `extension/dist/{extension.js,webview.js,webview.css}`, copies `engine/` to `extension/engine/`)
 - Typecheck: `npm run typecheck` (`tsc -p core && tsc -p extension && tsc -p webview`)
-- Test: `npm test` (`node --experimental-strip-types --test tests/*.test.ts`; 85 tests, ~30 s; needs `g++` and `gdb` because tests really compile and trace the examples)
+- Test: `npm test` (`node --experimental-strip-types --test tests/*.test.ts`; 89 tests, ~35 s; needs `g++` and `gdb` because tests really compile and trace the examples)
 - Package the .vsix: `npm run build && npm run package -w extension -- -o ../dsv.vsix` (`@vscode/vsce` devDependency of `extension/`; script `vsce package --no-dependencies`).
   `*.vsix` is gitignored (not tracked).
 - Trace a file and print the scenes: `npm run trace -- examples/binary-trees/bst.cpp [step|last] [--json]` (no arg: step count + program output).
@@ -22,7 +22,7 @@ Run from the repo root unless noted. All verified on this machine (Node 22, GDB,
 - Interactive: open `extension/` in VS Code, F5 (Extension Development Host), right-click a `.cpp` -> "Visualize Code".
 
 ## Architecture map
-- `engine/debugger/gdb_tracer.py`: GDB-side script. Single-steps the debuggee, reads memory, writes trace JSONL (schema v3). Observations only, no inference.
+- `engine/debugger/gdb_tracer.py`: GDB-side script. Single-steps the debuggee, reads memory, writes trace JSONL (schema v4). Observations only, no inference.
 - `engine/runtime/shim.cpp`: `LD_PRELOAD` shim logging `operator new/delete` to an alloc log the tracer reads.
 - `core/`: pure TypeScript, no VS Code/Node-runtime coupling, shared by extension and webview.
   - `events/types.ts`: trace schema, `parseTrace`, `SCHEMA_VERSION` (see `docs/events.md`)
@@ -71,7 +71,7 @@ Known limitations are in [docs/limitations.md](docs/limitations.md); read it bef
 - M10: done (`.github/workflows/ci.yml`, see Commands > CI)
 - M11: stronger sandboxing (bwrap/seccomp)
 - M12: LLDB backend
-- Future (unscheduled): delta-encoded traces. Every step carries full `frames`, so trace size grows with container size (13.5 MB for the 1000-element `std::map` benchmark, 1606 steps, 200 entries read per step); store per-step diffs against the previous step instead.
+- Future: delta-encoded *heap events inside object_created* and `local_changed` old/new values (frames are already delta-encoded, schema v4, see `docs/events.md`).
 
 ## Rules for working in this repo
 - Run `npm run typecheck` and `npm test` before declaring anything done; report failures honestly with output.

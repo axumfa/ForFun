@@ -261,3 +261,19 @@ test("list internal view falls back to logical when validation fails: corrupted 
   assert.equal(b.views!.current, "logical"); assert.match(b.views!.reason!, /300 elements/);
   assert.ok(collectStl(big.history.stateAt(finalStep(big))).find((r) => r.label === "big")!.v.entries.every((e) => e.id), "truncated list still has node ids in the logical view");
 });
+
+// ---- schema v4: the delta-encoded trace decodes to exactly the full-frame trace -------------------------------------------------------
+import { runTrace } from "../extension/src/execution/runner.ts";
+import { cfg as runCfg, root as repoRoot } from "./helpers.ts";
+import * as pathMod from "node:path";
+
+test("delta frames: decoded steps are identical to a trace written without deltas (DSV_NO_DELTA=1); the wire is much smaller", async () => {
+  for (const [f, setup] of [["stl/map.cpp", "std::map<int,int> big;\nfor (int i = 0; i < 300; i++) big[i] = i % 7;\nbig.erase(5);\nint done = 1;"], ["binary-trees/bst.cpp", undefined], ["stl/list.cpp", undefined]] as const) {
+    const file = pathMod.join(repoRoot, "examples", f), run = () => runTrace(file, { ...runCfg, entry: setup ? { setup } : undefined });
+    process.env.DSV_NO_DELTA = "0";                    // same-length value in both runs: the environment size shifts stack addresses
+    let a, b; try { a = await run(); process.env.DSV_NO_DELTA = "1"; b = await run(); } finally { delete process.env.DSV_NO_DELTA; }
+    assert.equal(a.trace.steps.length, b.trace.steps.length, f);
+    for (let i = 0; i < a.trace.steps.length; i++) assert.deepEqual(a.trace.steps[i]!.frames, b.trace.steps[i]!.frames, `${f}@${i}`);
+    if (setup) assert.ok(a.traceBytes * 4 < b.traceBytes, `${f}: delta ${a.traceBytes} vs full ${b.traceBytes}`);
+  }
+});

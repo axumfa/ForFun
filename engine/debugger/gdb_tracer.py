@@ -1,9 +1,9 @@
-"""GDB backend: single-steps a -O0 -g debuggee and writes trace schema v3 (JSONL).
+"""GDB backend: single-steps a -O0 -g debuggee and writes trace schema v4 (JSONL).
 Run:  gdb -q -batch -x gdb_tracer.py --args ./prog    with DSV_* env vars (see CONFIG).
 Principle: every value written here was read from the debuggee's memory; nothing is inferred or invented."""
 import gdb, glob, itertools, json, os, re, signal, sys, threading, time
 
-SCHEMA = 3
+SCHEMA = 4
 E = os.environ
 MAX_STEPS = int(E.get("DSV_MAX_STEPS", "20000"))
 STALL_SECONDS = float(E.get("DSV_STALL_SECONDS", "3"))      # max wall time inside ONE gdb `step`
@@ -419,7 +419,44 @@ def diff(old, new):
             if of.get(k) != v: ev.append({"type": "local_changed", "var": k, "old": slim(of.get(k)), "new": slim(v)})
     return ev
 
+def vdiff(o, n):
+    """Structural patch turning value `o` into `n` (both JSON-like). Markers `$o` (changed keys / indices), `$x` (removed keys), `$l` (new list length):
+    C++ identifiers cannot contain `$`, so a patch is never confused with a value. Anything else is sent whole."""
+    if isinstance(o, dict) and isinstance(n, dict):
+        r = {"$o": {k: (vdiff(o[k], v) if k in o else v) for k, v in n.items() if k not in o or o[k] != v}}
+        rm = [k for k in o if k not in n]
+        if rm: r["$x"] = rm
+        return r
+    if isinstance(o, list) and isinstance(n, list):
+        return {"$l": len(n), "$o": {str(i): (vdiff(o[i], n[i]) if i < len(o) else n[i]) for i in range(len(n)) if i >= len(o) or o[i] != n[i]}}
+    return n
+
+def delta_value(o, n):
+    if isinstance(n, (dict, list)) and type(o) is type(n):
+        p = vdiff(o, n)
+        if len(json.dumps(p, separators=(",", ":"))) < len(json.dumps(n, separators=(",", ":"))): return p
+    return n
+
+_last_frames = []
+def encode_frames(frames):
+    """Schema v4: a frame whose outer-indexed predecessor (same depth from the outermost frame, same fn/file) exists is sent as a delta:
+    `{"fn","file","line","d":1,"locals":{only new/changed, container values as structural patches (vdiff)},"keys":[all names, only if the set/order changed]}`. Decoded by core `parseTrace`."""
+    global _last_frames
+    out, n, m = [], len(frames), len(_last_frames)
+    for i, f in enumerate(frames):
+        j = m - n + i
+        p = _last_frames[j] if 0 <= j < m else None
+        if p is not None and p["fn"] == f["fn"] and p["file"] == f["file"]:
+            pl, fl = p["locals"], f["locals"]
+            d = {"fn": f["fn"], "file": f["file"], "line": f["line"], "d": 1, "locals": {k: (delta_value(pl[k], v) if k in pl else v) for k, v in fl.items() if k not in pl or pl[k] != v}}
+            if list(fl) != list(pl): d["keys"] = list(fl)
+            out.append(d)
+        else: out.append(f)
+    _last_frames = frames
+    return out
+
 def write(rec):
+    if rec.get("kind") == "step" and os.environ.get("DSV_NO_DELTA") != "1": rec["frames"] = encode_frames(rec["frames"])
     rec["schema"] = SCHEMA; OUT.write(json.dumps(rec, separators=(",", ":")) + "\n"); OUT.flush()
 
 def end(reason, code=None, message=None, **extra):

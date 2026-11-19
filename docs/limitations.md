@@ -26,7 +26,7 @@ LLDB/Clang were not installed here and nothing was tested with them.
 - Objects reachable from stack pointers are discovered when first seen through a typed pointer; an allocation that is never referenced by a
   typed pointer (e.g. only through `void*`) is not drawn. Pointer-typed values pointing at *garbage that happens to fall in a live allocation*
   are reported as pointing there (that is what memory contains).
-- Cost: roughly 5-20 ms per step; the default cap is 20000 steps (`dsv.maxSteps`). The whole trace is held in memory and sent to the webview.
+- Cost: roughly 5-20 ms per step; the default cap is 20000 steps (`dsv.maxSteps`). The whole trace is held in memory (expanded frames share unchanged values by reference) and sent to the webview. On disk/wire frames are delta-encoded (schema v4).
 
 **Recognition** is heuristic (field names, field types, observed back-links). Unusual designs (sentinel nodes, arrays-as-trees with unusual names,
 intrusive lists) may be classified as `generic` or with low confidence. Heap vs. array detection uses names (`heap`, `queue`, `stack`, `hash`, `graph`).

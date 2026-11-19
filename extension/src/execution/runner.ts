@@ -54,7 +54,7 @@ function exec(cmd: string, args: string[], opts: { cwd: string; env?: NodeJS.Pro
   });
 }
 
-export interface RunResult { trace: Trace; programOutput: string; log: string; sources: Record<string, string>; }
+export interface RunResult { trace: Trace; programOutput: string; log: string; traceBytes: number; sources: Record<string, string>; }
 
 /** C for `.c`; everything else (.cpp .cc .cxx .C, and anything unknown) is C++. The comparison is case-sensitive: `.C` is C++. */
 export type Lang = "c" | "c++";
@@ -113,7 +113,7 @@ export async function runTrace(sourceFile: string, cfg: RunnerConfig, workRoot =
     const programOutput = fs.existsSync(progOut) ? fs.readFileSync(progOut, "utf8").slice(0, cfg.maxOutputBytes) : "";
     const sources: Record<string, string> = { main: fs.readFileSync(sourceFile, "utf8") };
     if (driverText) sources.driver = driverText;
-    return { trace, programOutput, log: r.stderr, sources };
+    return { trace, programOutput, log: r.stderr, traceBytes: raw.length, sources };
   } finally {
     fs.rmSync(work, { recursive: true, force: true });
   }
