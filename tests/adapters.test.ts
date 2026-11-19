@@ -233,6 +233,7 @@ test("pointer graph: neighbour-vector edges equal the program's adjacency; no no
   const lab = (id: string) => sc.nodes.find((n) => n.id === id)!.label;
   const adj = sc.edges.map((e) => `${lab(e.from)}>${lab(e.to)}`).sort();
   assert.deepEqual(adj, ["0>1", "0>2", "1>3", "2>3", "2>4", "3>0"]);
+  assert.ok(!scenesAt(l, stepAt(l, "for (GNode* n : g) delete n;")).scenes.some((s) => /GNode@0x[0-9a-f]+\.out/.test(s.title)), "per-node neighbour vectors are not drawn a second time as array scenes");
 });
 
 test("union-find arrays: following the drawn parent array reproduces the printed roots", async () => {

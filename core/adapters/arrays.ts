@@ -10,15 +10,16 @@ import { fit, newScene } from "./scene-util.ts";
 export interface ArrayRef {
   id: string; label: string; owner?: string; kind: "array" | "vector"; elems: Value[]; elemType: string;
   siblings: Record<string, Value>; capacity?: number; released?: boolean;
+  ownerObj?: string;    // heap object this array is a member of (so an adapter that drew that object can skip its pointer arrays)
 }
 type Src = Pick<RuntimeState, "frames" | "objects">;
 
 /** All array-like storage visible in a state: locals (outermost frame first so owners win over aliases), struct members, heap arrays. */
 export function collectArrays(src: Src): ArrayRef[] {
   const refs = new Map<string, ArrayRef>();
-  const add = (id: string | undefined, label: string, v: ArrayValue, owner: string | undefined, sib: Record<string, Value>) => {
+  const add = (id: string | undefined, label: string, v: ArrayValue, owner: string | undefined, sib: Record<string, Value>, ownerObj?: string) => {
     const key = id ?? `arr:${label}`;
-    if (!refs.has(key)) refs.set(key, { id: key, label, owner, kind: v.kind as "array" | "vector", elems: v.elems, elemType: v.elemType, siblings: sib, capacity: v.capacity, released: v.released });
+    if (!refs.has(key)) refs.set(key, { id: key, label, owner, kind: v.kind as "array" | "vector", elems: v.elems, elemType: v.elemType, siblings: sib, capacity: v.capacity, released: v.released, ownerObj });
   };
   const walk = (name: string, v: Value, owner: string | undefined, sib: Record<string, Value>, depth: number) => {
     if (isArr(v)) add(v.addr ? `arr:${v.addr}` : undefined, name, v, owner, sib);
@@ -32,7 +33,7 @@ export function collectArrays(src: Src): ArrayRef[] {
     if (o.state !== "LIVE") continue;
     const t = o.type.replace(/\[\]$/, "");
     if (o.elems) add(`arr:${o.addr}`, `${t}[${o.elems.length}] @${o.addr}`, { kind: "array", elemType: t, elems: o.elems }, undefined, {});
-    for (const [k, v] of Object.entries(o.fields ?? {})) if (isArr(v)) add(v.addr ? `arr:${v.addr}` : `arr:${o.addr}.${k}`, `${t}@${o.addr}.${k}`, v, t, o.fields!);
+    for (const [k, v] of Object.entries(o.fields ?? {})) if (isArr(v)) add(v.addr ? `arr:${v.addr}` : `arr:${o.addr}.${k}`, `${t}@${o.addr}.${k}`, v, t, o.fields!, o.addr);
   }
   return [...refs.values()];
 }
@@ -99,11 +100,13 @@ function arrayScene(state: RuntimeState, r: ArrayRef, claims: Claims): Scene | n
 
 export const arrayAdapter: DataStructureAdapter = {
   id: "array",
-  canHandle: (state, claims) => collectArrays(state).some((r) => !claims.arrays.has(r.id)),
+  canHandle: (state, claims) => collectArrays(state).some((r) => !claims.arrays.has(r.id) && !(r.ownerObj && claims.objects.has(r.ownerObj) && r.elems.every(isPtr))),
   interpret(state, claims) {
     const out: Scene[] = [];
     for (const r of collectArrays(state)) {
       if (claims.arrays.has(r.id)) continue;
+      // A pointer array inside a node that another adapter drew (graph neighbours, trie children) is already drawn as that node's edges.
+      if (r.ownerObj && claims.objects.has(r.ownerObj) && r.elems.every(isPtr)) continue;
       if (r.elems.length === 0 && !r.released) continue;   // empty containers draw nothing (their size is in the variables panel)
       const s = arrayScene(state, r, claims);
       if (s) { out.push(s); claims.arrays.add(r.id); }
