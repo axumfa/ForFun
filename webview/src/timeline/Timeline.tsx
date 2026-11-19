@@ -18,6 +18,8 @@ export function Controls(p: { history: History; pb: Playback }) {
       <button onClick={pb.prev} disabled={pb.index === 0} title="Previous step (←)">◀ Prev</button>
       <button onClick={pb.toggle} disabled={last <= 0} title="Play/Pause (Space)" className="primary">{pb.playing ? "⏸ Pause" : "▶ Play"}</button>
       <button onClick={pb.next} disabled={pb.index >= last} title="Next step (→)">Next ▶</button>
+      <button onClick={() => pb.setIndex(h.nextHeapChange(pb.index, -1) ?? 0)} disabled={pb.index === 0} title="Previous step that changed the heap ([)" aria-label="Previous heap change">⇤ Change</button>
+      <button onClick={() => pb.setIndex(h.nextHeapChange(pb.index, 1) ?? last)} disabled={pb.index >= last} title="Next step that changed the heap (]); End = last step, PgUp/PgDn = ±10" aria-label="Next heap change">Change ⇥</button>
       <label className="speed">Speed
         <select value={pb.speed} onChange={(e) => pb.setSpeed(Number(e.target.value))}>{SPEEDS.map((s) => <option key={s} value={s}>{s}×</option>)}</select>
       </label>

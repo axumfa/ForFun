@@ -10,7 +10,7 @@ The UI only draws relationships that were observed in memory; it never guesses o
 1. Open a `.c` or `.cpp` file, right-click → **Visualize Code** (or run the command from the palette).
 2. Pick `main`, a function, or a class. For a function/class, enter the statements to run, e.g.
    `Node* h = nullptr; h = push(h, 3); h = push(h, 4); remove(h, 3);` (C: `Node* h = NULL; ...`; a plain `struct Node` is offered as `struct Node obj = {0};`) (a generated `main()` includes your file; yours is not run).
-3. Use Play / Pause / Prev / Next / Reset / speed / timeline (keys: ← → Space Home). Click a node to inspect it.
+3. Use Play / Pause / Prev / Next / Reset / speed / timeline (keys: ← → Space Home End, PgUp/PgDn = ±10 steps, [ ] = previous/next step that changed the heap). Click a node to inspect it.
 
 ## Recognised structures
 Arrays, vectors, singly/doubly linked lists, stacks, queues (list- or array-based), binary trees/BST/AVL/red-black (colour from an enum or

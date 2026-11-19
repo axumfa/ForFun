@@ -72,3 +72,15 @@ test("expandFrames: delta against the same depth from the outermost frame; keys 
 test("parseTrace rejects the previous schema", () => {
   assert.throws(() => parseTrace('{"kind":"step","schema":3,"step":0,"fn":"main","file":"main","line":1,"depth":1,"frames":[],"events":[]}'), /unsupported schema/);
 });
+
+test("nextHeapChange: skips steps without heap writes (local_changed does not count), both directions, null at the ends", () => {
+  const t = mk(30), h = new History(t, 7);
+  const idx = t.steps.filter((s) => s.events.some((e) => e.type !== "local_changed")).map((s) => s.step);
+  assert.ok(idx.length > 3);
+  assert.equal(h.nextHeapChange(0, 1), idx.find((i) => i > 0));
+  for (const i of idx) assert.equal(h.nextHeapChange(i, 1), idx.find((k) => k > i) ?? null);
+  for (const i of idx) assert.equal(h.nextHeapChange(i, -1), [...idx].reverse().find((k) => k < i) ?? null);
+  assert.equal(h.nextHeapChange(29, 1), null); assert.equal(h.nextHeapChange(0, -1), null);
+  t.steps[10]!.events.push({ type: "local_changed", var: "x", old: 1, new: 2 });
+  assert.equal(new History(t, 7).nextHeapChange(9, 1), idx.find((k) => k > 9), "a local change alone is not a heap change");
+});

@@ -55,6 +55,12 @@ export class History {
   }
   get length(): number { return this.steps.length; }
 
+  /** Nearest step after (dir 1) or before (dir -1) `i` whose events changed the heap (created/freed/field or element written); null if there is none. Lets the UI skip long loops. */
+  nextHeapChange(i: number, dir: 1 | -1): number | null {
+    for (let k = i + dir; k >= 0 && k < this.steps.length; k += dir) if (this.steps[k]!.events.some((e) => e.type !== "local_changed")) return k;
+    return null;
+  }
+
   private heapAt(i: number): Heap {
     const kf = Math.floor(i / this.interval) * this.interval;
     const heap = clone(this.keyframes.get(kf) ?? {});

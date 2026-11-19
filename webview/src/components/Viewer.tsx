@@ -24,6 +24,9 @@ export function Viewer(p: ViewerProps) {
     const k = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement).tagName === "INPUT" || (e.target as HTMLElement).tagName === "SELECT") return;
       if (e.key === "ArrowRight") pb.next(); else if (e.key === "ArrowLeft") pb.prev(); else if (e.key === " ") { e.preventDefault(); pb.toggle(); } else if (e.key === "Home") pb.reset();
+      else if (e.key === "End") pb.setIndex(history.length - 1);
+      else if (e.key === "PageDown") pb.setIndex(pb.index + 10); else if (e.key === "PageUp") pb.setIndex(pb.index - 10);
+      else if (e.key === "]") pb.setIndex(history.nextHeapChange(pb.index, 1) ?? history.length - 1); else if (e.key === "[") pb.setIndex(history.nextHeapChange(pb.index, -1) ?? 0);
     };
     window.addEventListener("keydown", k);
     return () => window.removeEventListener("keydown", k);

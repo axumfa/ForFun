@@ -30,6 +30,8 @@ test("viewer renders a real trace through the adapters: stack, scene, freed poin
   assert.match(render(5), /step 6\//);
   const afterPush = r.trace.steps.findIndex((s) => s.events.some((e) => e.type === "object_created"));
   const html = render(afterPush);
+  assert.match(html, /aria-label="Next heap change"/); assert.match(html, /aria-label="Previous heap change"/);
+  assert.match(render(r.trace.steps.length - 1), /<button disabled=""[^>]*aria-label="Next heap change"/, "no next change after the last step");
   assert.match(html, /class="node box created/);                       // newly allocated node is highlighted as created
   assert.match(html, /Singly linked list of Node/);
 });
