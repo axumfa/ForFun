@@ -32,7 +32,7 @@ LLDB/Clang were not installed here and nothing was tested with them.
 
 **Recognition** is heuristic (field names, field types, observed back-links). Unusual designs (sentinel nodes, arrays-as-trees with unusual names,
 intrusive lists) may be classified as `generic` or with low confidence. Heap vs. array detection uses names (`heap`, `queue`, `stack`, `hash`, `graph`).
-Index markers on arrays are integer variables with index-like names. A `new[]` array is titled after the variable that points at it (`a → int[6]`, `s.data → int[4]`; outermost frame wins), else by type and address.
+Array cells of struct/`pair` elements show a key-like field (`key first val value data id to x k v name`, else the first scalar) as the label and the other fields below, full content on hover; a heap is recognised by name for scalar *or* struct elements. `std::vector` iterators (`__gnu_cxx::__normal_iterator`, e.g. a range-for's hidden `__begin`) are shown as text and no longer pull the vector's storage in as a second scene. Index markers on arrays are integer variables with index-like names. A `new[]` array is titled after the variable that points at it (`a → int[6]`, `s.data → int[4]`; outermost frame wins), else by type and address.
 
 **Security**: user code is compiled and run. Protections: separate process group, wall-clock timeout, CPU `ulimit -t`, address-space `ulimit -v`
 (`dsv.maxMemoryMB`), output caps, step cap, and, for the **traced run** (`dsv.sandbox: auto`, default), bubblewrap when it is installed and works (probed once at startup):

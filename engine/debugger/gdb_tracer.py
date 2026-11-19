@@ -134,7 +134,7 @@ MAPLIKE = ("map", "multimap", "unordered_map", "unordered_multimap")
 # reader) and must not turn into stray "pointer graph" objects of their own.
 INTERNAL_NODE_RE = re.compile(r"^std::(_Rb_tree_node|_List_node|__detail::_List_node|__detail::_Hash_node|_Deque_|_Sp_counted)")
 # Their iterators (`it`, a range-for's hidden `__begin`) point into node/chunk storage owned by the container: shown as text, not walked.
-ITER_RE = re.compile(r"^std::(_Rb_tree_(const_)?iterator|_List_(const_)?iterator|_Deque_iterator|__detail::_Node_(const_)?iterator)<")
+ITER_RE = re.compile(r"^std::(_Rb_tree_(const_)?iterator|_List_(const_)?iterator|_Deque_iterator|__detail::_Node_(const_)?iterator)<|^__gnu_cxx::__normal_iterator<")
 class Unavailable(Exception): pass
 class NotTracked(Unavailable): pass     # a node is not a live allocation of the shim: container unconstructed, destroyed or garbage
 

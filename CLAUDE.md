@@ -11,7 +11,7 @@ Run from the repo root unless noted. All verified on this machine (Node 22, GDB,
 - Install: `npm ci` (npm workspaces: `extension`, `webview`)
 - Build: `npm run build` (esbuild -> `extension/dist/{extension.js,webview.js,webview.css}`, copies `engine/` to `extension/engine/`)
 - Typecheck: `npm run typecheck` (`tsc -p core && tsc -p extension && tsc -p webview`)
-- Test: `npm test` (`node --experimental-strip-types --test tests/*.test.ts`; 110 tests, ~50 s; needs `g++` and `gdb` because tests really compile and trace the examples)
+- Test: `npm test` (`node --experimental-strip-types --test tests/*.test.ts`; 112 tests, ~55 s; needs `g++` and `gdb` because tests really compile and trace the examples)
 - Package the .vsix: `npm run build && npm run package -w extension -- -o ../dsv.vsix` (`@vscode/vsce` devDependency of `extension/`; script `vsce package --no-dependencies`).
   `*.vsix` is gitignored (not tracked).
 - Trace a file and print the scenes: `npm run trace -- examples/binary-trees/bst.cpp [step|last] [--json]` (no arg: step count + program output).

@@ -6,6 +6,19 @@ import { analyzeNodeTypes, collectRoots, isArr, isPtr, isScalar, isStruct, normT
 import { classify, edgeId, mkNode } from "./nodes.ts";
 import { layoutCircle, layoutTree } from "./layout.ts";
 import { fit, newScene } from "./scene-util.ts";
+import { compact } from "./stl.ts";
+
+const KEY_FIELDS = ["key", "first", "val", "value", "data", "id", "to", "x", "k", "v", "name"];
+const clipTo = (t: string, n: number) => (t.length > n ? t.slice(0, n - 1) + "…" : t);
+/** Text of one array element. Scalars and pointers as before; a struct/pair shows its key-like field as the label and the other scalar fields below; nested containers are summarised. `tip` has everything. */
+export function cellText(e: Value | undefined): { label: string; sub?: string; tip?: string } {
+  if (isPtr(e) && e.kind === "object") return { label: e.ptr.slice(-4), tip: `${e.ptr} → ${normType(e.to)}` };
+  if (!isStruct(e)) return isScalar(e) || isPtr(e) || e === null || e === undefined ? { label: show(e) } : { label: clipTo(compact(e), 9), tip: compact(e) };
+  const f = Object.entries(e.fields), pick = KEY_FIELDS.map((k) => f.find(([n]) => n === k)).find(Boolean) ?? f.find(([, v]) => isScalar(v)) ?? f[0];
+  if (!pick) return { label: "{}" };
+  const rest = f.filter((x) => x !== pick).map(([, v]) => compact(v)).join(",");
+  return { label: clipTo(compact(pick[1]), 7), sub: rest ? clipTo(rest, 9) : undefined, tip: f.map(([k, v]) => `${k}=${compact(v)}`).join(", ") };
+}
 
 export interface ArrayRef {
   id: string; label: string; owner?: string; kind: "array" | "vector"; elems: Value[]; elemType: string;
@@ -54,7 +67,7 @@ const prevOf = (state: RuntimeState, id: string): ArrayRef | undefined => (state
 function cells(s: Scene, r: ArrayRef, prev: ArrayRef | undefined, bound: number | null, y: number, idp = ""): SNode[] {
   return r.elems.map((e, i) => {
     const changed = !prev || JSON.stringify(prev.elems[i]) !== JSON.stringify(e);
-    const n: SNode = { id: `${s.id}${idp}[${i}]`, label: show(isPtr(e) && e.kind === "object" ? e.ptr.slice(-4) : e), x: 40 + i * 56, y, w: 56, h: 40, shape: "cell", status: bound !== null && i >= bound ? "unused" : prev && changed ? "changed" : "live", index: i };
+    const n: SNode = { id: `${s.id}${idp}[${i}]`, ...cellText(e), x: 40 + i * 56, y, w: 56, h: 40, shape: "cell", status: bound !== null && i >= bound ? "unused" : prev && changed ? "changed" : "live", index: i } as SNode;
     if (isPtr(e) && e.kind === "object" && e.obj && !e.offset) { n.ref = e.obj; n.tip = `${e.ptr} → ${normType(e.to)}`; }
     return n;
   });
@@ -62,7 +75,7 @@ function cells(s: Scene, r: ArrayRef, prev: ArrayRef | undefined, bound: number 
 
 function arrayScene(state: RuntimeState, r: ArrayRef, claims: Claims): Scene | null {
   const text = textOf(r);
-  const scalars = r.elems.every((e) => isScalar(e));
+  const scalars = r.elems.every((e) => isScalar(e) || isStruct(e));          // a heap of ints or of pairs/structs (priority_queue<pair<int,int>>)
   const kind = /heap|priority|pq/i.test(text) && scalars ? "heap" : /queue/i.test(text) ? "queue" : /stack/i.test(text) ? "stack" : "array";
   const sib = Object.entries(r.siblings);
   const hasPos = sib.some(([k]) => POS.test(k));
@@ -74,7 +87,7 @@ function arrayScene(state: RuntimeState, r: ArrayRef, claims: Claims): Scene | n
   const prev = prevOf(state, r.id);
   const twoD = r.elems.length > 0 && r.elems.every(isArr);
   if (twoD) {
-    (r.elems as ArrayValue[]).forEach((row, ri) => row.elems.forEach((e, ci) => s.nodes.push({ id: `${s.id}[${ri}][${ci}]`, label: show(e), x: 40 + ci * 48, y: 40 + ri * 44, w: 48, h: 40, shape: "cell", status: "live", index: ci })));
+    (r.elems as ArrayValue[]).forEach((row, ri) => row.elems.forEach((e, ci) => s.nodes.push({ id: `${s.id}[${ri}][${ci}]`, ...cellText(e), x: 40 + ci * 48, y: 40 + ri * 44, w: 48, h: 40, shape: "cell", status: "live", index: ci } as SNode)));
     s.title = `2D array ${r.label}`; fit(s); return s;
   }
   const base = kind === "heap" ? 0 : 50;
@@ -85,7 +98,7 @@ function arrayScene(state: RuntimeState, r: ArrayRef, claims: Claims): Scene | n
     const maxY = Math.max(0, ...[...L.pos.values()].map((p) => p.y));
     for (const [id, p] of L.pos) {
       const i = Number(id), ch = !prev || JSON.stringify(prev.elems[i]) !== JSON.stringify(r.elems[i]);
-      s.nodes.push({ id: `${s.id}.t[${i}]`, label: show(r.elems[i]), x: p.x - 20, y: p.y - 20, w: 40, h: 40, shape: "circle", status: prev && ch ? "changed" : "live", index: i });
+      s.nodes.push({ id: `${s.id}.t[${i}]`, label: clipTo(cellText(r.elems[i]).label, 4), tip: cellText(r.elems[i]).tip, x: p.x - 20, y: p.y - 20, w: 40, h: 40, shape: "circle", status: prev && ch ? "changed" : "live", index: i });
       for (const c of [2 * i + 1, 2 * i + 2]) if (c < n) s.edges.push({ id: `${s.id}.t${i}->${c}`, from: `${s.id}.t[${i}]`, to: `${s.id}.t[${c}]`, kind: "child", directed: false });
     }
     row.forEach((c) => { c.y = maxY + 80; });

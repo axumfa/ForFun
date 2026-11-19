@@ -8,7 +8,7 @@ import { findings } from "../core/analysis/findings.ts";
 const printed = (o: string) => o.trim().split(/\s+/);
 
 test("INVARIANT: every drawn heap edge exists in the observed pointer data (all examples, all steps)", async () => {
-  const files = ["linked-lists/list.cpp", "linked-lists/singly.cpp", "linked-lists/malloc_list.cpp", "linked-lists/doubly.cpp", "linked-lists/sentinel.cpp", "linked-lists/globals.cpp", "arrays/heap_arrays.cpp", "linked-lists/shared_ptr_list.cpp", "binary-trees/unique_ptr_tree.cpp", "binary-trees/shared_tree.cpp", "graphs/dfs_ptr.cpp", "arrays/union_find.cpp", "binary-trees/bst.cpp", "binary-trees/avl.cpp", "binary-trees/rbtree.cpp",
+  const files = ["linked-lists/list.cpp", "linked-lists/singly.cpp", "linked-lists/malloc_list.cpp", "linked-lists/doubly.cpp", "linked-lists/sentinel.cpp", "linked-lists/globals.cpp", "arrays/heap_arrays.cpp", "hash-tables/open_addressing.cpp", "graphs/dijkstra.cpp", "linked-lists/shared_ptr_list.cpp", "binary-trees/unique_ptr_tree.cpp", "binary-trees/shared_tree.cpp", "graphs/dfs_ptr.cpp", "arrays/union_find.cpp", "binary-trees/bst.cpp", "binary-trees/avl.cpp", "binary-trees/rbtree.cpp",
     "hash-tables/chained.cpp", "tries/trie.cpp", "stacks-queues/stack_queue.cpp",
     "stl/map.cpp", "stl/adapters.cpp", "stl/ptr_map.cpp", "stl/set.cpp", "stl/list.cpp", "stl/deque.cpp", "stl/unordered_map.cpp", "stl/custom_alloc.cpp",
     "c/singly.c", "c/bst.c", "c/dynarray.c", "c/hash.c"];
@@ -322,5 +322,34 @@ test("heap arrays are named after their owner (a, s.data), carry the index marke
   const names = a.markers.map((m) => m.name);
   assert.ok(["i", "lo", "hi"].every((n) => names.includes(n)), `markers ${names.join(",")}`);
   const end = scenesAt(l, stepAt(l, "for (int i = 0; i < 6; i++) std::printf")).scenes.find((s) => s.title.includes("a → int[6]"))!;
+  assert.deepEqual(end.nodes.map((n) => n.label), printed(l.output));
+});
+
+test("arrays of structs/pairs show their content in the cells (key-like field as label, rest below), not '…'", async () => {
+  const l = await load("hash-tables/open_addressing.cpp");
+  const sc = scenesAt(l, stepAt(l, "std::printf(\"%d\\n\", h.table[5].val)")).scenes.find((s) => s.title.includes("h.table"))!;
+  assert.ok(sc); assert.equal(sc.nodes.length, 8);
+  const by = new Map(sc.nodes.map((n) => [n.index!, n]));
+  assert.equal(by.get(3)!.label, "3"); assert.equal(by.get(3)!.sub, "30,true");
+  assert.equal(by.get(4)!.label, "11"); assert.equal(by.get(5)!.label, "19");          // 11 and 19 probed past 3 (all hash to 3): linear probing
+  assert.equal(by.get(6)!.label, "4", "4 % 8 = 4 is taken by 11, so 4 sits at 6");
+  assert.equal(by.get(0)!.sub, "0,false");
+  assert.match(by.get(3)!.tip!, /key=3, val=30, used=true/);
+  assert.ok(sc.nodes.every((n) => n.label !== "…"));
+});
+
+test("Dijkstra: pq of pairs is a heap with readable nodes; no storage-duplicate or generic scenes from range-for iterators; dist equals the output", async () => {
+  const l = await load("graphs/dijkstra.cpp");
+  const line = l.lines.findIndex((t) => t.includes("for (Edge e : g[u])")) + 1;
+  const mid = l.history.steps.findIndex((st, i) => st.file === "main" && st.line === line && scenesAt(l, i).scenes.some((s) => s.kind === "heap" && s.nodes.length >= 2));
+  assert.ok(mid > 0, "a step with a non-empty pq inside the relaxation loop");
+  const sc = scenesAt(l, mid).scenes;
+  assert.ok(!sc.some((s) => /@0x/.test(s.title)), sc.map((s) => s.title).join(" | "));
+  assert.ok(!sc.some((s) => s.kind === "generic"));
+  const pq = sc.find((s) => s.title.includes("pq"))!;
+  assert.equal(pq.kind, "heap"); assert.ok(pq.nodes.every((n) => n.label !== "…"));
+  const g = sc.find((s) => s.title.includes("g"))!;
+  assert.ok(g.nodes.every((n) => n.label !== "…"));
+  const end = scenesAt(l, stepAt(l, "for (int x : dist)")).scenes.find((s) => s.title === "Vector dist")!;
   assert.deepEqual(end.nodes.map((n) => n.label), printed(l.output));
 });
