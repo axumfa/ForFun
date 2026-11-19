@@ -7,7 +7,12 @@ on:
 
 jobs:
   build-test:
-    runs-on: ubuntu-latest
+    # ubuntu-22.04 (g++ 11.4, libstdc++ 12, gdb 12.1) is the older toolchain the STL node walks and printers are also checked against.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -58,6 +63,6 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: dsv-vsix
+          name: dsv-vsix-${{ matrix.os }}
           path: dsv.vsix
           if-no-files-found: error
