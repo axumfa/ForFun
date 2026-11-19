@@ -95,7 +95,7 @@ export function logicalScene(ref: StlRef, prev: StlRef | undefined): Scene {
 
 /** Which internal views exist. Only containers that have a node walk offer the switch; it is disabled (with the reason) when the walk was refused or truncated. */
 const WALKABLE = new Set(["map", "multimap", "set", "multiset", "list"]);
-const hasInternal = (v: StlValue) => v.internal?.kind === "rb";
+const hasInternal = (v: StlValue) => v.internal?.kind === "rb" || v.internal?.kind === "list";
 function viewsOf(ref: StlRef, current: "logical" | "internal"): Scene["views"] {
   const v = ref.v;
   if (!WALKABLE.has(v.container) || v.source === "raw") return undefined;
@@ -124,7 +124,7 @@ export function rbProblem(v: StlValue): string {
 }
 
 /** Internal view of map/set/multimap/multiset: the red-black tree exactly as the nodes link to each other (colours from `_M_color`). */
-export function internalScene(ref: StlRef, prev: StlRef | undefined): Scene {
+function rbScene(ref: StlRef, prev: StlRef | undefined): Scene {
   const v = ref.v, maplike = v.container.endsWith("map"), ids = entryIds(ref.id, v), root = (v.internal as { root: number }).root;
   const s = newScene(ref.id, "binary-tree", `std::${v.container} ${ref.label} — red-black tree, ${v.size} node${v.size === 1 ? "" : "s"}`, 1,
     "red-black tree links (_M_parent/_M_left/_M_right/_M_color) read from the nodes and validated against size() and the pretty-printer");
@@ -151,6 +151,41 @@ export function internalScene(ref: StlRef, prev: StlRef | undefined): Scene {
   s.notes.push(bad ? `Red-black properties violated: ${bad}.` : "Red-black properties hold: the root is black, no red node has a red child, every path has the same number of black nodes.");
   s.notes.push("Colours are the nodes' _M_color. Hover a node for its key and value; nodes keep their address while the tree rebalances.");
   fit(s); return s;
+}
+
+/**
+ * Internal view of std::list: the doubly linked nodes. The walk (validated: every node live, `_M_prev` of each node is the node before it, count == size())
+ * guarantees the links are exactly "entry i <-> entry i+1", so they are drawn from the order; the sentinel inside the list object closes the circle.
+ */
+function listScene(ref: StlRef, prev: StlRef | undefined): Scene {
+  const v = ref.v, ids = entryIds(ref.id, v), n = ids.length;
+  const s = newScene(ref.id, "doubly-linked-list", `std::list ${ref.label} — doubly linked nodes, ${v.size} node${v.size === 1 ? "" : "s"}`, 1,
+    "list links (_M_next/_M_prev) read from the nodes and validated against size() and the pretty-printer");
+  s.views = viewsOf(ref, "internal");
+  const pv = prev && prev.v.source === "walk" && prev.v.internal?.kind === "list" ? prev : undefined;
+  const pids = pv ? entryIds(pv.id, pv.v) : [];
+  const was = pv ? new Map(pids.map((id, i) => [id, pv.v.entries[i]!] as const)) : null;
+  const perRow = 8;
+  v.entries.forEach((e, i) => {
+    const pe = was?.get(ids[i]!);
+    s.nodes.push({ id: ids[i]!, label: clip(compact(e.value), 8), x: 40 + (i % perRow) * 110, y: 50 + Math.floor(i / perRow) * 90, w: 72, h: 40, shape: "box", index: i,
+      tip: `${compact(e.value)} @${ids[i]}`, status: !was ? "live" : !pe ? "created" : JSON.stringify(pe.value) !== JSON.stringify(e.value) ? "changed" : "live" });
+  });
+  const old = new Set<string>();
+  pids.forEach((id, i) => { if (i + 1 < pids.length) { old.add(edgeId(id, "next", pids[i + 1]!)); old.add(edgeId(pids[i + 1]!, "prev", id)); } });
+  for (let i = 0; i + 1 < n; i++) {
+    const nx = edgeId(ids[i]!, "next", ids[i + 1]!), pr = edgeId(ids[i + 1]!, "prev", ids[i]!);
+    s.edges.push({ id: nx, from: ids[i]!, to: ids[i + 1]!, kind: "next", directed: true, changed: !!pv && !old.has(nx) });
+    s.edges.push({ id: pr, from: ids[i + 1]!, to: ids[i]!, kind: "prev", directed: true, changed: !!pv && !old.has(pr) });
+  }
+  s.pointers = [{ name: "front", target: n ? ids[0]! : null, state: n ? "live" : "null" }, { name: "back", target: n ? ids[n - 1]! : null, state: n ? "live" : "null" }];
+  s.notes.push("Every node's prev/next agree. The sentinel node inside the std::list object closes the circle (front.prev and back.next point to it; it holds no value and is not drawn).");
+  fit(s); return s;
+}
+
+/** Internal view of whichever kind the walk validated. */
+export function internalScene(ref: StlRef, prev: StlRef | undefined): Scene {
+  return ref.v.internal?.kind === "list" ? listScene(ref, prev) : rbScene(ref, prev);
 }
 
 export const stlAdapter: DataStructureAdapter = {

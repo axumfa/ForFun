@@ -200,3 +200,64 @@ test("containers without an internal view (deque, unordered_map) show no Logical
     for (const sc of scenesAt(l, finalStep(l), { stlView: { d: "internal", u: "internal" } }).scenes) assert.equal(sc.views, undefined, f);
   }
 });
+
+// ---- internal view (std::list) -----------------------------------------------------------------------------------------------------
+const LINT = { stlView: { l: "internal", bad: "internal", big: "internal" } } as const;
+const listChain = (sc: { nodes: { id: string; label: string }[]; edges: { from: string; to: string; kind: string }[]; pointers: { name: string; target: string | null }[] }): string[] => {
+  const out: string[] = [], lab = new Map(sc.nodes.map((n) => [n.id, n.label])), seen = new Set<string>();
+  let cur = sc.pointers.find((p) => p.name === "front")?.target ?? null;
+  while (cur && !seen.has(cur)) { seen.add(cur); out.push(lab.get(cur)!); cur = sc.edges.find((e) => e.from === cur && e.kind === "next")?.to ?? null; }
+  return out;
+};
+
+test("list internal view: the node chain equals the program's output; every next has the matching prev; front/back are the ends", async () => {
+  const l = await load("stl/list.cpp");
+  const sc = scenesAt(l, finalStep(l), LINT).scenes.find((s) => s.views?.key === "l")!;
+  assert.equal(sc.kind, "doubly-linked-list"); assert.equal(sc.views!.current, "internal");
+  assert.deepEqual(listChain(sc), printed(l.output));                                          // 2 9 3 4
+  for (const e of sc.edges.filter((x) => x.kind === "next")) assert.ok(sc.edges.some((p) => p.kind === "prev" && p.from === e.to && p.to === e.from), "prev mirrors next");
+  assert.equal(sc.edges.length, 2 * (sc.nodes.length - 1));
+  assert.equal(sc.pointers.find((p) => p.name === "back")!.target, sc.nodes[sc.nodes.length - 1]!.id);
+});
+
+test("list internal view, every step: unique ids, links only between adjacent entries, same ids as the logical view", async () => {
+  const l = await load("stl/list.cpp");
+  for (let i = 0; i < l.history.length; i++) {
+    const it = scenesAt(l, i, LINT).scenes, lg = scenesAt(l, i).scenes;
+    for (const sc of it.filter((s) => s.views?.current === "internal")) {
+      const ids = sc.nodes.map((n) => n.id);
+      assert.equal(new Set(ids).size, ids.length, `@${i}`);
+      const pos = new Map(ids.map((id, k) => [id, k]));
+      for (const e of sc.edges) assert.equal(Math.abs(pos.get(e.from)! - pos.get(e.to)!), 1, `@${i}: ${e.id} must join neighbours`);
+      assert.deepEqual([...ids].sort(), lg.find((s) => s.id === sc.id)!.nodes.map((n) => n.id).sort(), `@${i}`);
+    }
+  }
+});
+
+test("list identity: push_front / insert / pop_front keep surviving node ids; only the new node is 'created', the popped one disappears", async () => {
+  const l = await load("stl/list.cpp");
+  const at = (m: string) => scenesAt(l, stepAt(l, m), LINT).scenes.find((s) => s.views?.key === "l")!;
+  const idOf = (sc: ReturnType<typeof at>, label: string) => sc.nodes.find((n) => n.label === label)!.id;
+  const a = at("l.push_front(1);"), b = at("l.push_back(4);");                                  // {2,3}  ->  {1,2,3}
+  assert.equal(idOf(b, "2"), idOf(a, "2")); assert.equal(idOf(b, "3"), idOf(a, "3"));
+  assert.equal(b.nodes.find((n) => n.label === "1")!.status, "created");
+  const c = at("l.insert(++l.begin(), 9);"), d = at("for (int x : l)");                       // {1,2,3,4} -> pop_front -> insert 9
+  assert.ok(!c.nodes.some((n) => n.label === "1"), "pop_front removed node 1"); assert.equal(idOf(d, "3"), idOf(c, "3"));
+  assert.deepEqual(d.nodes.filter((n) => n.status === "created").map((n) => n.label), ["9"]);
+  assert.ok(d.edges.some((e) => e.changed), "the links around the inserted node are flagged changed");
+  assert.equal(d.edges.filter((e) => e.changed && e.kind === "next").length, 2, "exactly the two next-links around 9 are new (2->9, 9->3)");
+});
+
+test("list internal view falls back to logical when validation fails: corrupted _M_prev, truncated size", async () => {
+  const bad = await load("stl/list.cpp", "std::list<int> bad = {1, 2, 3};\nvoid** first = *(void***)&bad;\nfirst[1] = nullptr;\nint done = 1;");
+  const v = collectStl(bad.history.stateAt(finalStep(bad))).find((r) => r.label === "bad")!.v;
+  assert.equal(v.internal, null); assert.match(v.internalError!, /prev\/next links disagree/);
+  assert.equal(v.source, "printer"); assert.deepEqual(v.entries.map((e) => e.value), [1, 2, 3]);
+  const sc = scenesAt(bad, finalStep(bad), LINT).scenes.find((s) => s.views?.key === "bad")!;
+  assert.equal(sc.views!.current, "logical"); assert.equal(sc.views!.internal, false); assert.match(sc.views!.reason!, /prev\/next links disagree/);
+  assert.deepEqual(stlItems(sc), ["1", "2", "3"]);
+  const big = await load("stl/list.cpp", "std::list<int> big;\nfor (int i = 0; i < 300; i++) big.push_back(i);\nint done = 1;");
+  const b = scenesAt(big, finalStep(big), LINT).scenes.find((s) => s.views?.key === "big")!;
+  assert.equal(b.views!.current, "logical"); assert.match(b.views!.reason!, /300 elements/);
+  assert.ok(collectStl(big.history.stateAt(finalStep(big))).find((r) => r.label === "big")!.v.entries.every((e) => e.id), "truncated list still has node ids in the logical view");
+});
