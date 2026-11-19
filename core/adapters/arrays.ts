@@ -2,7 +2,7 @@ import type { ArrayValue, Value } from "../events/types.ts";
 import type { RuntimeState } from "../snapshots/history.ts";
 import type { Scene, SNode } from "../models/scene.ts";
 import type { Claims, DataStructureAdapter } from "./types.ts";
-import { analyzeNodeTypes, collectRoots, isArr, isPtr, isScalar, isStruct, normType, show, target } from "./analysis.ts";
+import { analyzeNodeTypes, charText, collectRoots, isArr, isCharArr, isPtr, isScalar, isStruct, normType, show, target } from "./analysis.ts";
 import { classify, edgeId, mkNode } from "./nodes.ts";
 import { layoutCircle, layoutTree } from "./layout.ts";
 import { fit, newScene } from "./scene-util.ts";
@@ -12,6 +12,7 @@ const KEY_FIELDS = ["key", "first", "val", "value", "data", "id", "to", "x", "k"
 const clipTo = (t: string, n: number) => (t.length > n ? t.slice(0, n - 1) + "…" : t);
 /** Text of one array element. Scalars and pointers as before; a struct/pair shows its key-like field as the label and the other scalar fields below; nested containers are summarised. `tip` has everything. */
 export function cellText(e: Value | undefined): { label: string; sub?: string; tip?: string } {
+  if (isPtr(e) && e.str !== undefined) return { label: clipTo(JSON.stringify(e.str), 9), tip: `${e.ptr} → ${JSON.stringify(e.str)}` };
   if (isPtr(e) && e.kind === "object") return { label: e.ptr.slice(-4), tip: `${e.ptr} → ${normType(e.to)}` };
   if (!isStruct(e)) return isScalar(e) || isPtr(e) || e === null || e === undefined ? { label: show(e) } : { label: clipTo(compact(e), 9), tip: compact(e) };
   const f = Object.entries(e.fields), pick = KEY_FIELDS.map((k) => f.find(([n]) => n === k)).find(Boolean) ?? f.find(([, v]) => isScalar(v)) ?? f[0];
@@ -68,7 +69,8 @@ function cells(s: Scene, r: ArrayRef, prev: ArrayRef | undefined, bound: number 
   return r.elems.map((e, i) => {
     const changed = !prev || JSON.stringify(prev.elems[i]) !== JSON.stringify(e);
     const n: SNode = { id: `${s.id}${idp}[${i}]`, ...cellText(e), x: 40 + i * 56, y, w: 56, h: 40, shape: "cell", status: bound !== null && i >= bound ? "unused" : prev && changed ? "changed" : "live", index: i } as SNode;
-    if (isPtr(e) && e.kind === "object" && e.obj && !e.offset) { n.ref = e.obj; n.tip = `${e.ptr} → ${normType(e.to)}`; }
+    if (isPtr(e) && e.kind === "object" && e.obj && !e.offset) { n.ref = e.obj; n.tip = `${e.ptr} → ${e.str !== undefined ? JSON.stringify(e.str) : normType(e.to)}`; }
+    if (typeof e === "number" && /^(signed |unsigned )?char$/.test(r.elemType.replace(/\bconst\b/g, "").trim())) n.label = e === 0 ? "\\0" : e >= 32 && e < 127 ? String.fromCharCode(e) : String(e);
     return n;
   });
 }
@@ -119,15 +121,18 @@ function arrayScene(state: RuntimeState, r: ArrayRef, claims: Claims): Scene | n
   fit(s); return s;
 }
 
+/** A `char[]` member holding text: the node that owns it shows the string itself (label / field), so no separate array scene. */
+const isText = (r: ArrayRef): boolean => isCharArr({ kind: "array", elemType: r.elemType, elems: r.elems }) && charText({ kind: "array", elemType: r.elemType, elems: r.elems }) !== null;
+
 export const arrayAdapter: DataStructureAdapter = {
   id: "array",
-  canHandle: (state, claims) => collectArrays(state).some((r) => !claims.arrays.has(r.id) && !(r.ownerObj && claims.objects.has(r.ownerObj) && r.elems.every(isPtr))),
+  canHandle: (state, claims) => collectArrays(state).some((r) => !claims.arrays.has(r.id) && !(r.ownerObj && claims.objects.has(r.ownerObj) && (r.elems.every(isPtr) || isText(r)))),
   interpret(state, claims) {
     const out: Scene[] = [];
     for (const r of collectArrays(state)) {
       if (claims.arrays.has(r.id)) continue;
       // A pointer array inside a node that another adapter drew (graph neighbours, trie children) is already drawn as that node's edges.
-      if (r.ownerObj && claims.objects.has(r.ownerObj) && r.elems.every(isPtr)) continue;
+      if (r.ownerObj && claims.objects.has(r.ownerObj) && (r.elems.every(isPtr) || isText(r))) continue;
       if (r.elems.length === 0 && !r.released) continue;   // empty containers draw nothing (their size is in the variables panel)
       const s = arrayScene(state, r, claims);
       if (s) { out.push(s); claims.arrays.add(r.id); }
@@ -225,7 +230,7 @@ function gcands(state: RuntimeState, claims: Claims): { r: ArrayRef; kind: "list
     if (!ints) continue;
     const square01 = rows.every((row) => row.elems.length === n && row.elems.every((v) => v === 0 || v === 1));
     const validIds = rows.every((row) => row.elems.every((v) => (v as number) >= 0 && (v as number) < n));
-    const listy = /list|adj\b|graph|neigh/i.test(textOf(r));
+    const listy = /list|neigh/i.test(textOf(r));          // `adj`/`graph` fit both designs: a square 0/1 table is a matrix unless the name says list
     if (square01 && !listy) out.push({ r, kind: "matrix" });
     else if (validIds && rows.some((row) => row.elems.length > 0)) out.push({ r, kind: "list" });
   }

@@ -49,7 +49,7 @@ function collectNodes(state: RuntimeState, t: NodeType, claims: Claims): Built {
 
 export function mkNode(state: RuntimeState, t: NodeType, o: HeapObject, x: number, y: number, shape: "box" | "circle"): SNode {
   const lf = labelField(t);
-  const extras = t.scalarFields.filter((f) => f !== lf).map((f) => `${f}=${show(o.fields?.[f])}`);
+  const extras = [...t.scalarFields, ...t.textFields].filter((f) => f !== lf).map((f) => `${f}=${show(o.fields?.[f])}`);
   const ch = objChanged(state, o);
   const colorField = t.scalarFields.find((f) => /colou?r|red|black/i.test(f));
   const cv = colorField ? String(o.fields?.[colorField]) : "";

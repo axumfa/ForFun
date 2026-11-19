@@ -20,6 +20,7 @@ export function describeValue(v: Value | undefined, objects: Record<string, Heap
   return "?";
 }
 export function describePointer(p: PointerValue, objects: Record<string, HeapObject>): string {
+  if (p.str !== undefined && p.kind !== "null") return `${JSON.stringify(p.str)} (${p.ptr})`;
   switch (p.kind) {
     case "null": return "nullptr";
     case "object": return `→ ${describeObject(objects[p.obj!], p.obj!)}${p.offset ? ` (+${p.offset} bytes, inside the object)` : ""}`;

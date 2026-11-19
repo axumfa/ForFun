@@ -22,7 +22,7 @@ ever see full frames. `DSV_NO_DELTA=1` makes the tracer write full frames (used 
 
 ## Values
 `number | string | boolean | null | PointerValue | ArrayValue | StructValue | StlValue`
-- `PointerValue {ptr, to?, kind: null|object|freed|unresolved, obj?, offset?}` — `to` is the static pointee type. Only `kind: object` (exact
+- `PointerValue {ptr, to?, kind: null|object|freed|unresolved, obj?, offset?, str?}` (`str`: the text a `char*` points at) — `to` is the static pointee type. Only `kind: object` (exact
   base address, `offset` 0) is a graph edge. `unresolved` = stack/global/garbage, never drawn as a relationship.
 - `ArrayValue {kind: array|vector, elemType, elems, capacity?, released?, addr?}` — `released` = storage already freed, contents not read.
 - `StructValue {kind: struct, type, fields, addr?}`.

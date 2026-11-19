@@ -5,6 +5,14 @@ import type { HeapObject, RuntimeState } from "../snapshots/history.ts";
 export const isPtr = (v: Value | undefined): v is PointerValue => typeof v === "object" && v !== null && "ptr" in v;
 export const isArr = (v: Value | undefined): v is ArrayValue => typeof v === "object" && v !== null && "elems" in v && (v.kind === "array" || v.kind === "vector");
 export const isStruct = (v: Value | undefined): v is StructValue => typeof v === "object" && v !== null && "fields" in v && v.kind === "struct";
+/** `char name[16]`-style arrays are text. */
+export const isCharArr = (v: Value | undefined): v is ArrayValue => isArr(v) && v.kind === "array" && /^(signed |unsigned )?char$/.test(v.elemType.replace(/\bconst\b/g, "").trim());
+/** The text of a char array up to its first NUL; null if it holds anything but printable ASCII before that (then it is data, not text). */
+export function charText(v: ArrayValue): string | null {
+  let out = "";
+  for (const e of v.elems) { if (e === 0) return out; if (typeof e !== "number" || e < 32 || e > 126) return null; out += String.fromCharCode(e); }
+  return out;
+}
 export const isStl = (v: Value | undefined): v is StlValue => typeof v === "object" && v !== null && "kind" in v && v.kind === "stl";
 export const isScalar = (v: Value | undefined): v is number | string | boolean => typeof v === "number" || typeof v === "string" || typeof v === "boolean";
 
@@ -44,6 +52,7 @@ export interface NodeType {
   selfArrayFields: string[];     // arrays of pointers to the same type (trie children)
   selfVecFields: string[];       // vectors of pointers to the same type (graph neighbours)
   scalarFields: string[];
+  textFields: string[];          // char arrays holding text (names, words)
 }
 
 function fieldKinds(name: string, v: Value | undefined): "self" | "selfArr" | "selfVec" | "scalar" | "other" {
@@ -64,9 +73,10 @@ export function analyzeNodeTypes(state: RuntimeState): Map<string, NodeType> {
     if (!o.fields) continue;
     const name = baseType(o);
     let t = types.get(name);
-    if (!t) types.set(name, (t = { name, objs: [], selfFields: [], selfArrayFields: [], selfVecFields: [], scalarFields: [] }));
+    if (!t) types.set(name, (t = { name, objs: [], selfFields: [], selfArrayFields: [], selfVecFields: [], scalarFields: [], textFields: [] }));
     t.objs.push(o);
     for (const [f, v] of Object.entries(o.fields)) {
+      if (isCharArr(v) && charText(v) !== null) { if (!t.textFields.includes(f)) t.textFields.push(f); continue; }
       const k = fieldKinds(name, v);
       const list = k === "self" ? t.selfFields : k === "selfArr" ? t.selfArrayFields : k === "selfVec" ? t.selfVecFields : k === "scalar" ? t.scalarFields : null;
       if (list && !list.includes(f)) list.push(f);
@@ -82,16 +92,17 @@ export function target(state: RuntimeState, v: Value | undefined): HeapObject | 
   return state.objects[v.obj] ?? null;
 }
 
-const LABEL_PREF = ["key", "val", "value", "data", "x", "id", "item", "k", "v"];
+const LABEL_PREF = ["key", "val", "value", "data", "x", "id", "item", "k", "v"], TEXT_PREF = /^(name|title|word|text|str|label|key|id)$/i;
 export function labelField(t: NodeType): string | undefined {
   for (const p of LABEL_PREF) if (t.scalarFields.includes(p)) return p;
-  return t.scalarFields[0];
+  return t.textFields.find((f) => TEXT_PREF.test(f)) ?? t.scalarFields[0] ?? t.textFields[0];
 }
 export function show(v: Value | undefined): string {
   if (v === undefined || v === null) return "?";
   if (typeof v === "boolean") return v ? "true" : "false";
   if (isScalar(v)) return String(v);
-  if (isPtr(v)) return v.kind === "null" ? "∅" : v.ptr;
+  if (isPtr(v)) return v.kind === "null" ? "∅" : v.str !== undefined ? JSON.stringify(v.str) : v.ptr;
+  if (isCharArr(v)) { const t = charText(v); if (t !== null) return JSON.stringify(t); }
   return "…";
 }
 

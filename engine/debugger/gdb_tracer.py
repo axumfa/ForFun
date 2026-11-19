@@ -414,6 +414,22 @@ def read_stl(v, t, kind, objs, depth):
     r["unavailable"] = why or ("libstdc++ pretty-printers are not available (no node walk for std::%s)" % kind)
     return r
 
+def c_string(a, target):
+    """`char*` / `const char*` (also signed/unsigned): the NUL-terminated text it points at (<= 40 chars, printable ASCII only), else None. Pure observation of memory the program owns."""
+    try:
+        tt = target.strip_typedefs()
+        if tt.code not in (gdb.TYPE_CODE_INT, gdb.TYPE_CODE_CHAR) or tt.sizeof != 1 or "char" not in str(tt): return None
+        b = bytes(gdb.selected_inferior().read_memory(a, 41))
+    except Exception:
+        try: b = bytes(gdb.selected_inferior().read_memory(a, 1))
+        except Exception: return None
+    out = bytearray()
+    for c in b:
+        if c == 0: return out.decode("ascii")
+        if not 32 <= c < 127: return None
+        out.append(c)
+    return out.decode("ascii") + "…" if len(out) == 40 else out.decode("ascii")
+
 def read_val(v, objs, depth=0):
     try:
         t = v.type.strip_typedefs()
@@ -422,6 +438,8 @@ def read_val(v, objs, depth=0):
         if t.code == gdb.TYPE_CODE_PTR:
             a = int(v); kind, base, off = classify(a)
             r = {"ptr": hx(a), "kind": kind, "to": tname(t.target())}
+            cs = c_string(a, t.target()) if a else None
+            if cs is not None: r["str"] = cs
             if kind in ("object", "freed"): r["obj"] = hx(base)
             if kind == "object":
                 r["offset"] = off

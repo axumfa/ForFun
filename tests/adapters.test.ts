@@ -11,7 +11,7 @@ test("INVARIANT: every drawn heap edge exists in the observed pointer data (all 
   const files = ["linked-lists/list.cpp", "linked-lists/singly.cpp", "linked-lists/malloc_list.cpp", "linked-lists/doubly.cpp", "linked-lists/sentinel.cpp", "linked-lists/globals.cpp", "arrays/heap_arrays.cpp", "hash-tables/open_addressing.cpp", "graphs/dijkstra.cpp", "linked-lists/shared_ptr_list.cpp", "binary-trees/unique_ptr_tree.cpp", "binary-trees/shared_tree.cpp", "graphs/dfs_ptr.cpp", "arrays/union_find.cpp", "binary-trees/bst.cpp", "binary-trees/avl.cpp", "binary-trees/rbtree.cpp",
     "hash-tables/chained.cpp", "tries/trie.cpp", "stacks-queues/stack_queue.cpp",
     "stl/map.cpp", "stl/adapters.cpp", "stl/ptr_map.cpp", "stl/set.cpp", "stl/list.cpp", "stl/deque.cpp", "stl/unordered_map.cpp", "stl/custom_alloc.cpp",
-    "c/singly.c", "c/bst.c", "c/dynarray.c", "c/hash.c"];
+    "c/singly.c", "c/bst.c", "c/dynarray.c", "c/hash.c", "c/strings_matrix.c"];
   for (const f of files) {
     const l = await load(f);
     for (let i = 0; i < l.history.length; i++) {

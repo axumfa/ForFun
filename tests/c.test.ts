@@ -145,3 +145,31 @@ test("setup template: C uses struct syntax (no 'Node obj;' for a plain struct), 
   assert.equal(setupTemplate({ kind_: "class", name: "Node" }, "c++"), "Node obj; /* obj.method(); */");
   assert.equal(setupTemplate({ kind_: "function", name: "push", params: "Node* h, int v" }, "c"), "push(/* Node* h, int v */);");
 });
+
+test("C strings: char* shows its text, char[] members are the node's label (not a separate numeric array), an int[N][N] 0/1 table named adj is a matrix", async () => {
+  const l = await load("c/strings_matrix.c");
+  const sc = scenesAt(l, stepAt(l, "printf(\"%d %d %s\\n\"")).scenes;
+  const list = sc.find((s) => s.kind === "singly-linked-list")!;
+  assert.deepEqual(chain(list, ptrTarget(list, "head")), ["\"bob\"", "\"ann\""], "newest first, labelled by the name text");
+  assert.deepEqual(list.nodes.map((n) => n.sub).sort(), ["age=20", "age=21"]);
+  const names = sc.find((s) => s.title === "Array names")!;
+  assert.deepEqual(names.nodes.map((n) => n.label), ["\"ann\"", "\"bob\""]);
+  assert.ok(!sc.some((s) => /\.name\b/.test(s.title)), "no numeric scene for the char[16] members: " + sc.map((s) => s.title).join(" | "));
+  const g = sc.find((s) => s.kind === "graph")!;
+  assert.match(g.title, /adjacency matrix/);
+  assert.equal(g.edges.length, 3, "0-1, 1-2, 3-4 (symmetric, drawn undirected)");
+  const ring = sc.find((s) => s.title === "Array r.buf")!;
+  assert.deepEqual(ring.nodes.map((n) => n.label), ["6", "8", "9", "5"], "the 5th push wrapped around to slot 0");
+  assert.deepEqual(ring.markers.map((m) => m.name).sort(), ["head", "tail"]);
+});
+
+test("char[] buffers are drawn as characters, and `const char*` values are decoded in the variables/explanations", async () => {
+  const f = path.join(tmp, "chars.c");
+  fs.writeFileSync(f, `#include <stdio.h>\n#include <string.h>\nint main(void) {\n  char buf[6];\n  strcpy(buf, "hey");\n  const char* p = buf;\n  printf("%s\\n", p);\n  return 0;\n}\n`);
+  const r = await runTrace(f, cfg), h = new History(r.trace);
+  const i = h.steps.findIndex((s) => s.line === 7);
+  const sc = scenesAt({ history: h } as never, i).scenes.find((s) => s.title === "Array buf")!;
+  assert.deepEqual(sc.nodes.slice(0, 4).map((n) => n.label), ["h", "e", "y", "\\0"], "'hey' and its terminator; the cells after it are uninitialised bytes");
+  const frame = h.stateAt(i).frames[0]!.locals.p as { str?: string };
+  assert.equal(frame.str, "hey");
+});

@@ -8,6 +8,7 @@ export interface PointerValue {
   kind: "null" | "object" | "freed" | "unresolved";
   obj?: string;               // base address of the containing heap allocation (object|freed)
   offset?: number;            // byte offset inside that allocation (interior pointers)
+  str?: string;               // char*: the NUL-terminated text it points at (<= 40 chars, printable ASCII), if readable
 }
 export interface ArrayValue { kind: "array" | "vector"; elemType: string; elems: Value[]; capacity?: number; released?: boolean; addr?: string; }
 export interface StructValue { kind: "struct"; type: string; fields: Record<string, Value>; addr?: string; }

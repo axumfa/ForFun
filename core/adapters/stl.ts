@@ -12,7 +12,7 @@ export function compact(v: Value | undefined, depth = 0): string {
   if (v === undefined || v === null) return "?";
   if (typeof v === "boolean") return v ? "true" : "false";
   if (isScalar(v)) return String(v);
-  if (isPtr(v)) return v.kind === "null" ? "∅" : v.ptr;
+  if (isPtr(v)) return v.kind === "null" ? "∅" : v.str !== undefined ? JSON.stringify(v.str) : v.ptr;
   if (depth > 1) return "…";
   if (isArr(v)) return `[${v.elems.slice(0, 4).map((e) => compact(e, depth + 1)).join(",")}${v.elems.length > 4 ? ",…" : ""}]`;
   if (isStl(v)) return `${v.container}(${v.size})`;
