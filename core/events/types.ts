@@ -31,6 +31,8 @@ export interface StlValue {
 export type Value = number | string | boolean | PointerValue | ArrayValue | StructValue | StlValue | null;
 
 export type FileKey = "main" | "driver";
+/** Name of the pseudo-frame (always the outermost) that carries the program's global/static variables. */
+export const GLOBALS_FN = "(globals)";
 export interface Frame { fn: string; file: FileKey; line: number; locals: Record<string, Value>; }
 /** On the wire (v4) a frame may be a delta against the frame at the same depth (counted from the outermost) of the previous step; `parseTrace` expands it. */
 export interface WireFrame extends Frame { d?: 1; keys?: string[]; }

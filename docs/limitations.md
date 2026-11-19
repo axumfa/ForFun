@@ -24,6 +24,7 @@ LLDB/Clang were not installed here and nothing was tested with them.
 - A `step` that never returns (a loop whose whole body is on one line and never changes line) is interrupted by a watchdog after
   `DSV_STALL_SECONDS` (3s) and reported as `stalled`; the trace up to that point is kept.
 - Reads are per line, not per write: if a line modifies the same field twice, only the net change is seen.
+- **Globals**: file-scope and `static` variables of the user's source are read every step (pseudo-frame `(globals)`, shown as "globals" in the Variables panel and used like locals by the adapters: a global `Node* head` is a named pointer, a global array/vector/map is drawn). Library globals (`std::cout`) are not read; a global's initial value is its value at `main` (constructors of globals have already run). Globals declared in headers the user wrote are included only when the header is the source file itself.
 - Objects reachable from stack pointers are discovered when first seen through a typed pointer; an allocation that is never referenced by a
   typed pointer (e.g. only through `void*`) is not drawn. Pointer-typed values pointing at *garbage that happens to fall in a live allocation*
   are reported as pointing there (that is what memory contains).

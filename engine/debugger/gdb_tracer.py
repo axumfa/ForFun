@@ -464,14 +464,37 @@ def read_val(v, objs, depth=0):
         return "<unreadable: %s>" % e
 
 def file_key(sal):
+    """`sal` is anything with a `.symtab` (a gdb Symtab_and_line, or a Symbol)."""
     if not sal.symtab: return None
     p = os.path.realpath(sal.symtab.fullname())
     if p == SRC: return "main"
     if DRIVER and p == DRIVER: return "driver"
     return None
 
+GLOBALS = "(globals)"
+def read_globals(sal, objs):
+    """Variables with static storage declared in the user's source (file-scope, `static`), in declaration order. Returned as the locals of a pseudo-frame (fn "(globals)")."""
+    out = []
+    try:
+        st = sal.symtab
+        for blk in (st.global_block(), st.static_block()):
+            for sym in blk:
+                try:
+                    if not sym.is_variable or not sym.symtab or file_key(sym) is None: continue
+                except Exception: continue
+                out.append((sym.line, sym.name, sym))
+    except Exception: return {}
+    g = {}
+    for _, name, sym in sorted(out, key=lambda x: (x[0], x[1])):
+        if name in g or name.startswith("__"): continue
+        try: g[name] = read_val(sym.value(), objs)
+        except Exception: pass
+    return g
+
+def user_depth(frames): return sum(1 for f in frames if f["fn"] != GLOBALS)
+
 def snapshot():
-    read_log(); objs = {}; frames = []
+    read_log(); objs = {}; frames = []; gsal = None
     f = gdb.newest_frame()
     while f is not None:
         sal = f.find_sal(); fk = file_key(sal)
@@ -486,7 +509,11 @@ def snapshot():
                     b = b.superblock
             except gdb.error: pass
             frames.append({"fn": f.name(), "file": fk, "line": sal.line, "locals": loc})
+            gsal = gsal or sal
         f = f.older()
+    if gsal is not None:
+        g = read_globals(gsal, objs)
+        if g: frames.append({"fn": GLOBALS, "file": "main", "line": 0, "locals": g})
     # Objects no longer reachable from any local stay visible (leaks, detached nodes): re-read by remembered type.
     for b, i in list(allocs.items()):
         if i["state"] == "LIVE" and hx(b) not in objs and b in known: read_heap(b, known[b], objs)
@@ -517,10 +544,14 @@ def diff(old, new):
             for i, v in enumerate(o.get("elems", [])):
                 pe = p.get("elems", [])
                 if i >= len(pe) or pe[i] != v: ev.append({"type": "elem_changed", "addr": a, "index": i, "old": pe[i] if i < len(pe) else None, "new": v})
-    if old["frames"] and new["frames"] and old["frames"][0]["fn"] == new["frames"][0]["fn"]:
+    if old["frames"] and new["frames"] and old["frames"][0]["fn"] == new["frames"][0]["fn"] and new["frames"][0]["fn"] != GLOBALS:
         of, nf = old["frames"][0]["locals"], new["frames"][0]["locals"]
         for k, v in nf.items():
             if of.get(k) != v: ev.append({"type": "local_changed", "var": k, "old": slim(of.get(k)), "new": slim(v)})
+    og = next((f for f in old["frames"] if f["fn"] == GLOBALS), None); ng = next((f for f in new["frames"] if f["fn"] == GLOBALS), None)
+    if og and ng:
+        for k, v in ng["locals"].items():
+            if og["locals"].get(k) != v: ev.append({"type": "local_changed", "var": k, "old": slim(og["locals"].get(k)), "new": slim(v)})
     return ev
 
 def vdiff(o, n):
@@ -613,7 +644,7 @@ def main():
                 finally: deadline[0] = None
                 continue
             cur = snapshot(); fr = cur["frames"][0]
-            write({"kind": "step", "step": n, "fn": fr["fn"], "file": fr["file"], "line": sal.line, "depth": len(cur["frames"]),
+            write({"kind": "step", "step": n, "fn": fr["fn"], "file": fr["file"], "line": sal.line, "depth": user_depth(cur["frames"]),
                    "frames": cur["frames"], "events": diff(prev, cur)})
             n += 1; prev = cur
             stalled[0] = False; deadline[0] = time.time() + STALL_SECONDS
@@ -625,7 +656,7 @@ def main():
                 sig = last_signal[0]; last_signal[0] = None
                 snap = snapshot(); f0 = snap["frames"][0] if snap["frames"] else None
                 if f0:
-                    write({"kind": "step", "step": n, "fn": f0["fn"], "file": f0["file"], "line": f0["line"], "depth": len(snap["frames"]),
+                    write({"kind": "step", "step": n, "fn": f0["fn"], "file": f0["file"], "line": f0["line"], "depth": user_depth(snap["frames"]),
                            "frames": snap["frames"], "events": diff(prev, snap)})
                 return end("crashed", None, "program received signal " + sig, signal=sig, line=f0["line"] if f0 else None)
         except gdb.error as e:

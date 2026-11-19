@@ -1,3 +1,4 @@
+import { GLOBALS_FN } from "../events/types.ts";
 import type { ArrayValue, PointerValue, StlValue, StructValue, Value } from "../events/types.ts";
 import type { HeapObject, RuntimeState } from "../snapshots/history.ts";
 
@@ -25,11 +26,12 @@ export function collectRoots(state: RuntimeState): NamedPtr[] {
     else if (isStruct(v) && depth < 4) for (const [k, fv] of Object.entries(v.fields)) walk(`${name}.${k}`, fv, depth + 1);
     else if (isArr(v) && depth < 3) v.elems.forEach((e, i) => walk(`${name}[${i}]`, e, depth + 1));
   };
+  const userFrames = state.frames.filter((f) => f.fn !== GLOBALS_FN).length;      // the globals pseudo-frame is last: it does not shift call-depth numbering
   state.frames.forEach((f, fi) => {
     for (const [k, v] of Object.entries(f.locals)) {
       if (k === "this") continue;
       const dup = (nameCount.get(k) ?? 0) > 1;
-      walk(dup ? `${k}@${state.frames.length - 1 - fi}` : k, v, 0);
+      walk(dup ? `${k}@${f.fn === GLOBALS_FN ? "global" : userFrames - 1 - fi}` : k, v, 0);
     }
   });
   return out;

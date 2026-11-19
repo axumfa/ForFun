@@ -8,6 +8,9 @@ other versions and unknown kinds (a truncated *last* line, from a killed run, is
 - `end`: `{reason: exited|step_limit|error|crashed|stalled|timeout, exitCode, message?, signal?, line?, doubleFrees?}` — always last
   (synthesised as `timeout` by the runner if the process was killed).
 
+## Globals
+Variables with static storage declared in the user's source (file scope, `static`; not library globals) are carried as the **last** (outermost) frame of every step: `{fn: "(globals)", file: "main", line: 0, locals}`, in declaration order (`GLOBALS_FN` in `core/events/types.ts`). It is not a call frame: `depth` excludes it. Changes to a global appear as `local_changed` events. Function-local `static` variables are ordinary locals of their function. Added within schema v4 (older v4 traces simply lack the frame).
+
 ## Frame deltas (v4)
 On the wire a frame may be a delta against the frame at the same depth *counted from the outermost* frame in the previous step (same `fn` and `file`):
 `{fn, file, line, d: 1, locals: {only new or changed}, keys?: [all names in order, present only when the set/order changed]}`. A container-valued local

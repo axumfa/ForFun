@@ -8,7 +8,7 @@ import { findings } from "../core/analysis/findings.ts";
 const printed = (o: string) => o.trim().split(/\s+/);
 
 test("INVARIANT: every drawn heap edge exists in the observed pointer data (all examples, all steps)", async () => {
-  const files = ["linked-lists/list.cpp", "linked-lists/singly.cpp", "linked-lists/malloc_list.cpp", "linked-lists/doubly.cpp", "linked-lists/sentinel.cpp", "linked-lists/shared_ptr_list.cpp", "binary-trees/unique_ptr_tree.cpp", "binary-trees/shared_tree.cpp", "graphs/dfs_ptr.cpp", "arrays/union_find.cpp", "binary-trees/bst.cpp", "binary-trees/avl.cpp", "binary-trees/rbtree.cpp",
+  const files = ["linked-lists/list.cpp", "linked-lists/singly.cpp", "linked-lists/malloc_list.cpp", "linked-lists/doubly.cpp", "linked-lists/sentinel.cpp", "linked-lists/globals.cpp", "linked-lists/shared_ptr_list.cpp", "binary-trees/unique_ptr_tree.cpp", "binary-trees/shared_tree.cpp", "graphs/dfs_ptr.cpp", "arrays/union_find.cpp", "binary-trees/bst.cpp", "binary-trees/avl.cpp", "binary-trees/rbtree.cpp",
     "hash-tables/chained.cpp", "tries/trie.cpp", "stacks-queues/stack_queue.cpp",
     "stl/map.cpp", "stl/adapters.cpp", "stl/ptr_map.cpp", "stl/set.cpp", "stl/list.cpp", "stl/deque.cpp", "stl/unordered_map.cpp", "stl/custom_alloc.cpp",
     "c/singly.c", "c/bst.c", "c/dynarray.c", "c/hash.c"];
@@ -281,4 +281,32 @@ test("pointer cells carry a ref to the pointee: vector<Node*> cells and map valu
   assert.ok(sm, "the map is drawn"); const refs = sm.nodes.filter((n) => n.ref);
   assert.equal(refs.length, 3, "all three values are object pointers");
   for (const n of refs) assert.ok(nodes.some((x) => x.id === n.ref), "the pointee Node is drawn by its own adapter, under the id the ref names");
+});
+
+import { GLOBALS_FN } from "../core/events/types.ts";
+import { explainStep } from "../core/explain/explain.ts";
+
+test("globals: file-scope variables are read as an outermost pseudo-frame; the global list head is a named pointer and the global array is drawn", async () => {
+  const l = await load("linked-lists/globals.cpp");
+  const i = stepAt(l, "for (int i = 0; i < 6; i++) std::printf");
+  const st = l.history.stateAt(i), g = st.frames[st.frames.length - 1]!;
+  assert.equal(g.fn, GLOBALS_FN); assert.deepEqual(Object.keys(g.locals), ["head", "arr", "count"], "declaration order");
+  assert.equal(st.frames.filter((f) => f.fn === GLOBALS_FN).length, 1);
+  const sc = scenesAt(l, i).scenes;
+  const list = sc.find((s) => s.kind === "singly-linked-list")!;
+  assert.deepEqual(chain(list, ptrTarget(list, "head")), ["3", "2", "1"]);
+  const arr = sc.find((s) => s.title === "Array arr")!;
+  assert.deepEqual(arr.nodes.map((n) => n.label), printed(l.output).slice(0, 6), "the global array, sorted by sort_arr(), equals the program's output");
+  assert.equal(l.history.steps[i]!.depth, 1, "the globals pseudo-frame does not count as call depth");
+});
+
+test("globals: a change to a global is an observed event and is explained; globals are in every step", async () => {
+  const l = await load("linked-lists/globals.cpp");
+  const texts: string[] = [];
+  for (let i = 0; i < l.history.length; i++) {
+    assert.equal(l.history.stateAt(i).frames.at(-1)!.fn, GLOBALS_FN, `@${i}`);
+    texts.push(...explainStep(l.history.stateAt(i), { main: l.lines }).effects);
+  }
+  assert.ok(texts.some((t) => /Variable 'count' changed from 0 to 1/.test(t)), texts.join("\n"));
+  assert.ok(texts.some((t) => /Variable 'head' changed/.test(t)));
 });

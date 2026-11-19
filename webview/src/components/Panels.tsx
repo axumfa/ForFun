@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { FileKey, Value } from "../../../core/events/types.ts";
+import { GLOBALS_FN, type FileKey, type Value } from "../../../core/events/types.ts";
 import type { History, HeapObject, RuntimeState } from "../../../core/snapshots/history.ts";
 import type { Scene } from "../../../core/models/scene.ts";
 import { describeObject, describeValue, explainStep } from "../../../core/explain/explain.ts";
@@ -44,9 +44,9 @@ export function Variables({ state, onJump }: { state: RuntimeState; onJump?: (n:
     <div>
       {state.frames.map((f, k) => (
         <div key={k} className="frame">
-          <div className="fn">{f.fn}() <small>line {f.line}</small></div>
+          <div className="fn">{f.fn === GLOBALS_FN ? <>globals <small>file scope / static</small></> : <>{f.fn}() <small>line {f.line}</small></>}</div>
           <table><tbody>{Object.entries(f.locals).map(([name, v]) => (
-            <tr key={name} className={k === 0 && state.prev && changed(f.fn, name, v) ? "chg" : ""}><td>{name}</td><td><ValueView v={v} objs={state.objects} /></td></tr>
+            <tr key={name} className={(k === 0 || f.fn === GLOBALS_FN) && state.prev && changed(f.fn, name, v) ? "chg" : ""}><td>{name}</td><td><ValueView v={v} objs={state.objects} /></td></tr>
           ))}</tbody></table>
         </div>
       ))}

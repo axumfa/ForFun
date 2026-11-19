@@ -1,3 +1,4 @@
+import { GLOBALS_FN } from "../events/types.ts";
 import type { FileKey, PointerValue, TraceEvent, Value } from "../events/types.ts";
 import type { HeapObject, RuntimeState } from "../snapshots/history.ts";
 import { isArr, isPtr, isScalar, isStl, isStruct } from "../adapters/analysis.ts";
@@ -57,7 +58,8 @@ function effectText(e: TraceEvent, s: RuntimeState): string {
     case "field_changed": return `${describeObject(o[e.addr], e.addr)}: field '${e.field}' changed from ${describeValue(e.old, o)} to ${describeValue(e.new, o)}.`;
     case "elem_changed": return `${o[e.addr]?.type ?? "array"}@${e.addr}[${e.index}] changed from ${describeValue(e.old, o)} to ${describeValue(e.new, o)}.`;
     case "local_changed": {
-      const cur = s.frames[0]?.locals[e.var], was = s.prev?.frames[0]?.locals[e.var];
+      const home = (fs: RuntimeState["frames"] | undefined) => (fs?.[0]?.locals[e.var] !== undefined ? fs[0] : fs?.find((f) => f.fn === GLOBALS_FN));
+      const cur = home(s.frames)?.locals[e.var], was = home(s.prev?.frames)?.locals[e.var];
       const d = isStl(cur) ? stlDelta(isStl(was) ? was : undefined, cur) : null;
       return `Variable '${e.var}' changed from ${describeValue(e.old, o)} to ${describeValue(e.new, o)}${d ? `: ${d}` : ""}.`;
     }
