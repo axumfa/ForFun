@@ -414,3 +414,26 @@ test("stlDelta: null when nothing comparable (raw, truncated) so the caller fall
   assert.equal(stlDelta(mk({}), mk({ entries: [{ value: 1 }, { value: 2 }], size: 2 })), "inserted 2");
   assert.equal(stlDelta(mk({}), mk({})), null);
 });
+
+// ---- container adapters and std::array ---------------------------------------------------------------------------------------------------
+test("std::stack / std::queue are drawn as such under the variable's name, with top / front / back; priority_queue is a heap named pq; std::array is named a", async () => {
+  const l = await load("stl/adapters.cpp");
+  const sc = scenesAt(l, stepAt(l, "std::printf(\"%d %d %d %d")).scenes;
+  const st = sc.find((s) => s.title.startsWith("std::stack st"))!, q = sc.find((s) => s.title.startsWith("std::queue q"))!;
+  assert.ok(st && q, sc.map((s) => s.title).join(" | "));
+  assert.equal(st.kind, "stack"); assert.equal(q.kind, "queue");
+  assert.deepEqual(stlItems(st), ["1", "2", "3"]); assert.deepEqual(stlItems(q), ["8", "9"]);        // 7 was popped
+  assert.equal(st.pointers.find((p) => p.name === "top")!.target, st.nodes[2]!.id);
+  assert.equal(q.pointers.find((p) => p.name === "front")!.target, q.nodes[0]!.id); assert.equal(q.pointers.find((p) => p.name === "back")!.target, q.nodes[1]!.id);
+  assert.ok(!sc.some((s) => /\.c\b|_M_elems/.test(s.title)), "no `.c` / `._M_elems` scenes: " + sc.map((s) => s.title).join(" | "));
+  const pq = sc.find((s) => s.kind === "heap")!, arr = sc.find((s) => s.title === "Array a")!;
+  assert.match(pq.title, /pq/); assert.equal(pq.nodes.filter((n) => n.shape === "circle").sort((a, b) => a.index! - b.index!).map((n) => n.label).join(" "), "9 5 1");
+  assert.ok(arr, "std::array drawn as `Array a`"); assert.deepEqual(arr.nodes.map((n) => n.label), ["50", "4", "3", "2", "1"]);
+});
+
+test("stack/queue: the Logical | Internal switch still works on the underlying deque, and a stack over a vector is a stack scene", async () => {
+  const l = await load("stl/adapters.cpp");
+  const i = stepAt(l, "std::printf(\"%d %d %d %d");
+  const sc = scenesAt(l, i, { stlView: { st: "internal" } }).scenes.find((s) => s.views?.key === "st")!;
+  assert.equal(sc.views!.current, "internal"); assert.equal(sc.nodes.filter((n) => n.shape === "box").length, 3);
+});

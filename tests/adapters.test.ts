@@ -10,7 +10,7 @@ const printed = (o: string) => o.trim().split(/\s+/);
 test("INVARIANT: every drawn heap edge exists in the observed pointer data (all examples, all steps)", async () => {
   const files = ["linked-lists/list.cpp", "linked-lists/singly.cpp", "linked-lists/malloc_list.cpp", "linked-lists/doubly.cpp", "linked-lists/sentinel.cpp", "linked-lists/shared_ptr_list.cpp", "binary-trees/unique_ptr_tree.cpp", "binary-trees/shared_tree.cpp", "graphs/dfs_ptr.cpp", "arrays/union_find.cpp", "binary-trees/bst.cpp", "binary-trees/avl.cpp", "binary-trees/rbtree.cpp",
     "hash-tables/chained.cpp", "tries/trie.cpp", "stacks-queues/stack_queue.cpp",
-    "stl/map.cpp", "stl/ptr_map.cpp", "stl/set.cpp", "stl/list.cpp", "stl/deque.cpp", "stl/unordered_map.cpp", "stl/custom_alloc.cpp",
+    "stl/map.cpp", "stl/adapters.cpp", "stl/ptr_map.cpp", "stl/set.cpp", "stl/list.cpp", "stl/deque.cpp", "stl/unordered_map.cpp", "stl/custom_alloc.cpp",
     "c/singly.c", "c/bst.c", "c/dynarray.c", "c/hash.c"];
   for (const f of files) {
     const l = await load(f);
@@ -25,7 +25,8 @@ test("INVARIANT: every drawn heap edge exists in the observed pointer data (all 
           const vals = Object.values(a.fields ?? {}).flatMap((v) => (isPtr(v) ? [v] : typeof v === "object" && v && "elems" in v ? v.elems.filter(isPtr) : []));
           assert.ok(vals.some((p) => p.obj === e.to && p.kind !== "null" && p.kind !== "unresolved"), `${f}@${i}: invented edge ${e.id}`);
         }
-        for (const p of sc.pointers) if (p.state === "live") assert.equal(state.objects[p.target!]?.state, "LIVE");
+        // STL scenes' pointers (top/front/back of an adapter) name container elements, not heap objects.
+        if (!sc.id.startsWith("stl:")) for (const p of sc.pointers) if (p.state === "live") assert.equal(state.objects[p.target!]?.state, "LIVE");
         for (const n of sc.nodes) if (n.status === "freed") assert.equal(state.objects[n.id]?.state, "FREED");
       }
     }

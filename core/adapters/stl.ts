@@ -21,17 +21,19 @@ export function compact(v: Value | undefined, depth = 0): string {
 }
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 
-export interface StlRef { id: string; label: string; v: StlValue; }
+export interface StlRef { id: string; label: string; v: StlValue; wrapper?: "stack" | "queue"; }
 type Src = Pick<RuntimeState, "frames" | "objects">;
 
 /** Every STL container visible in a state: locals (outermost frame first), members of struct locals, members of heap objects. */
 export function collectStl(src: Src): StlRef[] {
   const refs = new Map<string, StlRef>();
+  const wrap = new Map<StlValue, "stack" | "queue">();      // containers that are the `c` of a std::stack / std::queue: drawn as that adapter, under the variable's name
   const walk = (name: string, v: Value | undefined, depth: number) => {
+    if (isStruct(v)) { const m = /^std::(stack|queue)</.exec(v.type), c = v.fields.c; if (m && isStl(c)) { wrap.set(c, m[1] as "stack" | "queue"); walk(name, c, depth + 1); return; } }
     if (isStl(v)) {
       if (v.source === "raw" && name.split(".").some((p) => p.startsWith("__"))) return;   // compiler temporary not yet bound (range-for `__range1`): garbage, not data
-      const id = `stl:${v.addr ?? name}`, old = refs.get(id);          // a range-for's hidden `__range1` aliases the real variable: keep the user's name
-      if (!old || (old.label.startsWith("__") && !name.startsWith("__"))) refs.set(id, { id, label: name, v });
+      const id = `stl:${v.addr ?? name}`, old = refs.get(id), wrapper = wrap?.get(v);          // a range-for's hidden `__range1` aliases the real variable: keep the user's name
+      if (!old || (old.label.startsWith("__") && !name.startsWith("__"))) refs.set(id, { id, label: name, v, wrapper });
     }
     else if (isStruct(v) && depth < 3) for (const [k, fv] of Object.entries(v.fields)) walk(`${name}.${k}`, fv, depth + 1);
   };
@@ -61,7 +63,7 @@ const label = (e: StlEntry, maplike: boolean) => (maplike ? compact(e.key) : com
 /** Logical view: the container's elements in iteration order, one box per element (map: key, with `→ value` below). */
 export function logicalScene(ref: StlRef, prev: StlRef | undefined): Scene {
   const v = ref.v, maplike = v.keyType !== undefined || v.container.endsWith("map");
-  const s = newScene(ref.id, SCENE_KIND(v.container), `std::${v.container} ${ref.label}`, 1,
+  const s = newScene(ref.id, ref.wrapper ?? SCENE_KIND(v.container), ref.wrapper ? `std::${ref.wrapper} ${ref.label} (over std::${v.container})` : `std::${v.container} ${ref.label}`, 1,
     v.source === "walk" ? "libstdc++ container; elements read by a validated node walk" : v.source === "printer" ? "libstdc++ container; elements read through GDB's pretty-printer" : "libstdc++ container; no reader available");
   s.title += v.size >= 0 ? ` — ${v.size} element${v.size === 1 ? "" : "s"}` : "";
   s.views = viewsOf(ref, "logical");
@@ -82,6 +84,11 @@ export function logicalScene(ref: StlRef, prev: StlRef | undefined): Scene {
       status: !prevIds ? "live" : !was ? "created" : JSON.stringify(was.value) !== JSON.stringify(e.value) || JSON.stringify(was.key) !== JSON.stringify(e.key) ? "changed" : "live" };
     s.nodes.push(n);
   });
+  if (ref.wrapper && s.nodes.length && !v.truncated && v.entries.length === v.size) {
+    const first = s.nodes[0]!.id, last = s.nodes[v.entries.length - 1]!.id;
+    s.pointers = ref.wrapper === "stack" ? [{ name: "top", target: last, state: "live" }] : [{ name: "front", target: first, state: "live" }, { name: "back", target: last, state: "live" }];
+    s.notes.push(ref.wrapper === "stack" ? "std::stack: push/pop/top work at the last element of the underlying container." : "std::queue: push at the back, pop/front at the front of the underlying container.");
+  }
   if (v.truncated || v.entries.length < v.size) {
     const i = v.entries.length;
     s.nodes.push({ id: `${ref.id}:more`, label: `+${v.size - i}`, sub: "more", ...place(i), w, h: 44, shape: "box", status: "unused" });

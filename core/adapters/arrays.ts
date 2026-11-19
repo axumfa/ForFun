@@ -23,7 +23,11 @@ export function collectArrays(src: Src): ArrayRef[] {
   };
   const walk = (name: string, v: Value, owner: string | undefined, sib: Record<string, Value>, depth: number) => {
     if (isArr(v)) add(v.addr ? `arr:${v.addr}` : undefined, name, v, owner, sib);
-    else if (isStruct(v) && depth < 3) for (const [k, fv] of Object.entries(v.fields)) walk(`${name}.${k}`, fv, v.type, v.fields, depth + 1);
+    else if (isStruct(v) && depth < 3) {
+      // std::array / stack / queue / priority_queue are one-member wrappers: the storage is the variable itself, not `x._M_elems` / `x.c`.
+      const wrap = /^std::(array|priority_queue|stack|queue)</.test(v.type);
+      for (const [k, fv] of Object.entries(v.fields)) walk(wrap && (k === "_M_elems" || k === "c") ? name : `${name}.${k}`, fv, v.type, v.fields, depth + 1);
+    }
   };
   [...src.frames].reverse().forEach((f, fi) => {
     for (const [k, v] of Object.entries(f.locals)) walk(k, v, undefined, {}, 0);
