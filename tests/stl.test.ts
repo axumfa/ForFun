@@ -343,3 +343,28 @@ test("unordered internal view is refused for a custom allocator or a truncated c
   const sc = scenesAt(big, finalStep(big), HINT).scenes.find((s) => s.views?.key === "h")!;
   assert.equal(sc.views!.internal, false); assert.equal(sc.views!.current, "logical"); assert.match(sc.views!.reason!, /300 elements/);
 });
+
+// ---- explanations of container changes ---------------------------------------------------------------------------------------------------
+import { explainStep, stlDelta } from "../core/explain/explain.ts";
+
+test("explain: container changes say what was inserted, updated and removed (map, set, list); sizes alone only as fallback", async () => {
+  const texts: string[] = [];
+  for (const [f, setup] of [["stl/map.cpp", "std::map<int, int> m;\nm[1] = 10;\nm[2] = 20;\nm[1] = 11;\nm.erase(2);\nint done = 1;"], ["stl/set.cpp", "std::set<int> s = {5, 6};\ns.insert(7);\nint done = 1;"], ["stl/list.cpp", "std::list<int> q = {1, 2};\nq.push_front(0);\nint done = 1;"]] as const) {
+    const l = await load(f, setup);
+    for (let i = 0; i < l.history.length; i++) texts.push(...explainStep(l.history.stateAt(i), { main: l.lines }).effects.filter((t) => /changed from/.test(t) && /std::/.test(t)));
+  }
+  const has = (re: RegExp) => assert.ok(texts.some((t) => re.test(t)), `${re}\n${texts.join("\n")}`);
+  has(/'m'.*inserted 1 → 0/); has(/'m'.*updated 1: 0 → 10/);            // operator[] default-constructs the value first, then the assignment updates it
+  has(/'m'.*inserted 2 → 0/); has(/'m'.*updated 1: 10 → 11/); has(/'m'.*removed 2 → 20/);
+  assert.ok(!texts.some((t) => /\d{9,} elements/.test(t)), "no garbage sizes from not-yet-constructed containers");
+  has(/'s'.*inserted 7/); has(/'q'.*inserted 0/);
+});
+
+test("stlDelta: null when nothing comparable (raw, truncated) so the caller falls back to sizes", () => {
+  const mk = (over: Partial<StlValue>): StlValue => ({ kind: "stl", container: "set", type: "std::set<int>", size: 1, truncated: false, entries: [{ value: 1 }], source: "printer", ...over });
+  assert.equal(stlDelta(undefined, mk({})), null);
+  assert.equal(stlDelta(mk({}), mk({ source: "raw" })), null);
+  assert.equal(stlDelta(mk({ truncated: true }), mk({ entries: [{ value: 1 }, { value: 2 }], size: 2 })), null);
+  assert.equal(stlDelta(mk({}), mk({ entries: [{ value: 1 }, { value: 2 }], size: 2 })), "inserted 2");
+  assert.equal(stlDelta(mk({}), mk({})), null);
+});

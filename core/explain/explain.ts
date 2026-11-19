@@ -1,6 +1,8 @@
 import type { FileKey, PointerValue, TraceEvent, Value } from "../events/types.ts";
 import type { HeapObject, RuntimeState } from "../snapshots/history.ts";
 import { isArr, isPtr, isScalar, isStl, isStruct } from "../adapters/analysis.ts";
+import { compact, entryIds } from "../adapters/stl.ts";
+import type { StlValue } from "../events/types.ts";
 
 export function describeObject(o: HeapObject | undefined, addr: string): string {
   if (!o) return addr;
@@ -13,7 +15,7 @@ export function describeValue(v: Value | undefined, objects: Record<string, Heap
   if (isScalar(v)) return String(v);
   if (isArr(v)) return `${v.kind}[${v.elems.length}]`;
   if (isStruct(v)) return `${v.type}{…}`;
-  if (isStl(v)) return v.size >= 0 ? `std::${v.container} with ${v.size} element${v.size === 1 ? "" : "s"}` : `std::${v.container}`;
+  if (isStl(v)) return v.source !== "raw" && v.size >= 0 && v.size < 1e9 ? `std::${v.container} with ${v.size} element${v.size === 1 ? "" : "s"}` : `std::${v.container} (not constructed yet, or unreadable)`;   // a not-yet-constructed container reads as garbage
   return "?";
 }
 export function describePointer(p: PointerValue, objects: Record<string, HeapObject>): string {
@@ -23,6 +25,22 @@ export function describePointer(p: PointerValue, objects: Record<string, HeapObj
     case "freed": return `→ freed memory ${p.obj}`;
     default: return `${p.ptr} (not a tracked heap object)`;
   }
+}
+
+const MAX_LISTED = 4;
+/**
+ * What changed inside an STL container, from the recorded entries of two consecutive steps. Elements are matched by node id (map/set/list/unordered_*), else by key,
+ * else by position. null when either side cannot be compared (raw, or cut at the per-container read limit): the caller then reports sizes only.
+ */
+export function stlDelta(a: StlValue | undefined, b: StlValue): string | null {
+  if (!a || a.container !== b.container || a.source === "raw" || b.source === "raw" || a.truncated || b.truncated) return null;
+  const maplike = b.container.endsWith("map"), show = (e: { key?: Value; value: Value }) => (maplike ? `${compact(e.key)} → ${compact(e.value)}` : compact(e.value));
+  const ia = entryIds("a", a), ib = entryIds("a", b), ma = new Map(ia.map((id, i) => [id, a.entries[i]!] as const)), mb = new Map(ib.map((id, i) => [id, b.entries[i]!] as const));
+  const out: string[] = [];
+  for (const [id, e] of mb) { const o = ma.get(id); if (!o) out.push(`inserted ${show(e)}`); else if (JSON.stringify(o.value) !== JSON.stringify(e.value)) out.push(maplike ? `updated ${compact(e.key)}: ${compact(o.value)} → ${compact(e.value)}` : `${compact(o.value)} became ${compact(e.value)}`); }
+  for (const [id, e] of ma) if (!mb.has(id)) out.push(`removed ${show(e)}`);
+  if (!out.length) return null;
+  return out.length > MAX_LISTED ? `${out.slice(0, MAX_LISTED).join("; ")}; … (${out.length} changes)` : out.join("; ");
 }
 
 export interface Explanation {
@@ -38,7 +56,11 @@ function effectText(e: TraceEvent, s: RuntimeState): string {
     case "object_freed": return `Freed ${describeObject(o[e.addr], e.addr)}. Pointers that still hold ${e.addr} are now dangling.`;
     case "field_changed": return `${describeObject(o[e.addr], e.addr)}: field '${e.field}' changed from ${describeValue(e.old, o)} to ${describeValue(e.new, o)}.`;
     case "elem_changed": return `${o[e.addr]?.type ?? "array"}@${e.addr}[${e.index}] changed from ${describeValue(e.old, o)} to ${describeValue(e.new, o)}.`;
-    case "local_changed": return `Variable '${e.var}' changed from ${describeValue(e.old, o)} to ${describeValue(e.new, o)}.`;
+    case "local_changed": {
+      const cur = s.frames[0]?.locals[e.var], was = s.prev?.frames[0]?.locals[e.var];
+      const d = isStl(cur) ? stlDelta(isStl(was) ? was : undefined, cur) : null;
+      return `Variable '${e.var}' changed from ${describeValue(e.old, o)} to ${describeValue(e.new, o)}${d ? `: ${d}` : ""}.`;
+    }
   }
 }
 
