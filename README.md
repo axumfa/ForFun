@@ -15,14 +15,14 @@ The UI only draws relationships that were observed in memory; it never guesses o
 ## Recognised structures
 Arrays, vectors, singly/doubly linked lists, stacks, queues (list- or array-based), binary trees/BST/AVL/red-black (colour from an enum or
 bool field), binary heaps (array/vector named like a heap), hash tables with chaining, graphs (adjacency list/matrix or node with a neighbour
-vector), tries, and a generic pointer-graph fallback. Each scene shows a **confidence** and the reason for the classification
+vector, `std::vector<T*>` cells click through to their nodes), tries, STL containers (`map set multimap multiset list deque unordered_*` — a logical view and, for all but `deque`, an internal view: red-black tree, list nodes, bucket chains), smart pointers (`unique_ptr`/`shared_ptr`/`weak_ptr`/`make_shared` are followed like raw pointers), and a generic pointer-graph fallback. Each scene shows a **confidence** and the reason for the classification
 (hover). Edges are always observed pointer values; classification is a heuristic.
 
 ## Requirements and settings
 Linux, `g++` (also builds the allocation shim), `gcc` for C files, `gdb` with Python support. The language comes from the file extension
 (`.c` = C; `.cpp .cc .cxx .C` = C++). Heap blocks from `malloc/calloc/realloc/free` and `new/delete` are tracked. Settings under `dsv.*`: compiler, cCompiler,
-gdb, cppStandard, cStd (default `c11`), extraCompilerFlags, extraCFlags, timeouts, maxSteps, maxMemoryMB, isolateNetwork. See `docs/limitations.md` for what is *not* supported (important before relying on it).
+gdb, cppStandard, cStd (default `c11`), extraCompilerFlags, extraCFlags, timeouts, maxSteps, maxMemoryMB, isolateNetwork, sandbox (`auto`: run the program under bubblewrap when installed: read-only filesystem, no network, `$HOME` hidden). See `docs/limitations.md` for what is *not* supported (important before relying on it).
 
 ## Develop
-`npm install && npm run build && npm test` — F5 on `extension/` runs it in an Extension Development Host. Architecture: `docs/architecture.md`.
+`npm install && npm run build && npm test` — F5 on `extension/` runs it in an Extension Development Host. `npm run trace -- examples/binary-trees/bst.cpp last` traces a file and prints the scenes without VS Code. Architecture: `docs/architecture.md`.
 # ForFun
