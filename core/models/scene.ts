@@ -15,6 +15,7 @@ export interface SNode {
   addr?: string;                  // heap address when the node is a heap object
   index?: number;                 // array index when the node is a cell
   tip?: string;                   // hover text with the full content when the label had to be shortened
+  ref?: string;                   // id (heap address) of the object this cell/element points at, for pointer-chasing across scenes (no edge is drawn)
 }
 export type EdgeKind = "next" | "prev" | "left" | "right" | "child" | "ptr" | "edge" | "bucket";
 export interface SEdge { id: string; from: string; to: string; kind: EdgeKind; label?: string; changed?: boolean; directed: boolean; }

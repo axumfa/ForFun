@@ -48,6 +48,7 @@ function cells(s: Scene, r: ArrayRef, prev: ArrayRef | undefined, bound: number 
   return r.elems.map((e, i) => {
     const changed = !prev || JSON.stringify(prev.elems[i]) !== JSON.stringify(e);
     const n: SNode = { id: `${s.id}${idp}[${i}]`, label: show(isPtr(e) && e.kind === "object" ? e.ptr.slice(-4) : e), x: 40 + i * 56, y, w: 56, h: 40, shape: "cell", status: bound !== null && i >= bound ? "unused" : prev && changed ? "changed" : "live", index: i };
+    if (isPtr(e) && e.kind === "object" && e.obj && !e.offset) { n.ref = e.obj; n.tip = `${e.ptr} → ${normType(e.to)}`; }
     return n;
   });
 }

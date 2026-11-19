@@ -17,7 +17,7 @@ function edgePath(e: SEdge, a: SNode, b: SNode): { d: string; lx: number; ly: nu
   return { d: `M${sx},${sy} C${mx},${sy + bend + (ty - sy) * 0.1} ${mx},${ty + bend} ${tx},${ty}`, lx: mx, ly: (sy + ty) / 2 + bend / 2 };
 }
 
-export function SceneView(p: { scene: Scene; selected: string | null; onSelect(id: string | null): void; onView?(key: string, mode: "logical" | "internal"): void }) {
+export function SceneView(p: { scene: Scene; selected: string | null; onSelect(id: string | null, fallback?: string): void; onView?(key: string, mode: "logical" | "internal"): void }) {
   const s = p.scene, byId = new Map(s.nodes.map((n) => [n.id, n]));
   const mid = `arrow-${s.id.replace(/\W/g, "")}`;
   const ptrsByNode = new Map<string, string[]>();
@@ -60,8 +60,8 @@ export function SceneView(p: { scene: Scene; selected: string | null; onSelect(i
             );
           })}
           {s.nodes.map((n) => (
-            <g key={n.id} className={`node ${n.shape} ${n.status} ${n.fill ?? ""} ${p.selected === n.id ? "sel" : ""}`} style={{ transform: `translate(${n.x}px,${n.y}px)` }}
-               onClick={(ev) => { ev.stopPropagation(); p.onSelect(n.id); }} tabIndex={0} role="button" aria-label={`${n.label} ${n.status}`}>
+            <g key={n.id} className={`node ${n.shape} ${n.status} ${n.fill ?? ""} ${p.selected === n.id ? "sel" : ""} ${n.ref && p.selected === n.ref ? "refers" : ""}`} style={{ transform: `translate(${n.x}px,${n.y}px)` }}
+               onClick={(ev) => { ev.stopPropagation(); p.onSelect(n.ref ?? n.id, n.id); }} tabIndex={0} role="button" aria-label={`${n.label} ${n.status}`}>
               {n.tip && <title>{n.tip}</title>}
               {n.shape === "circle" ? <>
                 <circle cx={n.w / 2} cy={n.h / 2} r={n.w / 2} />

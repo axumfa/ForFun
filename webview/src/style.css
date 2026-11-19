@@ -24,6 +24,7 @@ svg { display:block; max-width:none; overflow: visible; }
 .node.created rect, .node.created circle { fill: color-mix(in srgb, var(--ok) 35%, var(--node)); stroke: var(--ok); }
 .node.changed rect, .node.changed circle { fill: color-mix(in srgb, var(--warn) 40%, var(--node)); stroke: var(--warn); }
 .node.freed { opacity:.55; } .node.freed rect, .node.freed circle { stroke-dasharray: 5 4; stroke: var(--bad); }
+.node.refers rect, .node.refers circle { stroke: var(--acc); stroke-width: 2.5; stroke-dasharray: 4 3; }
 .node.unused { opacity:.35; } .node.sel rect, .node.sel circle { stroke: var(--acc); stroke-width: 3; }
 .node.red circle, .node.red rect { fill:#c0392b; } .node.black circle, .node.black rect { fill:#1c1c1c; }
 .node.red text.val, .node.black text.val { fill:#fff; }

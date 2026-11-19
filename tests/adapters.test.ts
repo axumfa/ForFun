@@ -10,7 +10,7 @@ const printed = (o: string) => o.trim().split(/\s+/);
 test("INVARIANT: every drawn heap edge exists in the observed pointer data (all examples, all steps)", async () => {
   const files = ["linked-lists/list.cpp", "linked-lists/singly.cpp", "linked-lists/malloc_list.cpp", "linked-lists/doubly.cpp", "linked-lists/sentinel.cpp", "linked-lists/shared_ptr_list.cpp", "binary-trees/unique_ptr_tree.cpp", "binary-trees/shared_tree.cpp", "graphs/dfs_ptr.cpp", "arrays/union_find.cpp", "binary-trees/bst.cpp", "binary-trees/avl.cpp", "binary-trees/rbtree.cpp",
     "hash-tables/chained.cpp", "tries/trie.cpp", "stacks-queues/stack_queue.cpp",
-    "stl/map.cpp", "stl/set.cpp", "stl/list.cpp", "stl/deque.cpp", "stl/unordered_map.cpp", "stl/custom_alloc.cpp",
+    "stl/map.cpp", "stl/ptr_map.cpp", "stl/set.cpp", "stl/list.cpp", "stl/deque.cpp", "stl/unordered_map.cpp", "stl/custom_alloc.cpp",
     "c/singly.c", "c/bst.c", "c/dynarray.c", "c/hash.c"];
   for (const f of files) {
     const l = await load(f);
@@ -264,4 +264,20 @@ test("make_shared list with weak_ptr back links: both directions drawn, chain eq
   const sc = scenesAt(l, stepAt(l, "for (auto n = head; n; n = n->next) std::printf")).scenes.find((s) => s.kind === "doubly-linked-list")!;
   assert.ok(sc); assert.deepEqual(chain(sc, ptrTarget(sc, "head")), printed(l.output));
   assert.equal(sc.edges.filter((e) => e.kind === "prev").length, 3);
+});
+
+test("pointer cells carry a ref to the pointee: vector<Node*> cells and map values point at drawn heap objects (no cross-scene edges)", async () => {
+  const l = await load("graphs/dfs_ptr.cpp");
+  const sc = scenesAt(l, stepAt(l, "for (GNode* n : g) delete n;")).scenes;
+  const vec = sc.find((s) => s.title.includes("Vector g"))!;
+  const graph = sc.find((s) => s.kind === "graph")!;
+  assert.equal(vec.nodes.length, 5);
+  for (const c of vec.nodes) { assert.ok(c.ref, "every cell of g holds a live object pointer"); assert.ok(graph.nodes.some((n) => n.id === c.ref), "and the pointee is a node of the graph scene"); }
+  assert.deepEqual(vec.edges, [], "refs are not edges");
+  const m = await load("stl/ptr_map.cpp");
+  const at = scenesAt(m, stepAt(m, "for (const auto& kv : index)")).scenes;
+  const sm = at.find((x) => x.kind === "map")!, nodes = at.filter((x) => x.kind !== "map").flatMap((x) => x.nodes);
+  assert.ok(sm, "the map is drawn"); const refs = sm.nodes.filter((n) => n.ref);
+  assert.equal(refs.length, 3, "all three values are object pointers");
+  for (const n of refs) assert.ok(nodes.some((x) => x.id === n.ref), "the pointee Node is drawn by its own adapter, under the id the ref names");
 });

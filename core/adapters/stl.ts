@@ -225,10 +225,20 @@ function hashScene(ref: StlRef, prev: StlRef | undefined): Scene {
   fit(s); return s;
 }
 
+/** Elements that are (or, for maps, whose value is) a pointer to a tracked heap object get `ref`: the UI can jump to the pointee although no edge crosses scenes. */
+const refOfEntry = (e: StlEntry): string | undefined => {
+  for (const x of [e.value, e.key]) if (isPtr(x) && x.kind === "object" && x.obj && !x.offset) return x.obj;
+  return undefined;
+};
+function withRefs(s: Scene, v: StlValue): Scene {
+  for (const n of s.nodes) { const e = n.index !== undefined ? v.entries[n.index] : undefined; const r = e && refOfEntry(e); if (r) n.ref = r; }
+  return s;
+}
+
 /** Internal view of whichever kind the walk validated. */
 export function internalScene(ref: StlRef, prev: StlRef | undefined): Scene {
   const k = ref.v.internal?.kind;
-  return k === "list" ? listScene(ref, prev) : k === "hash" ? hashScene(ref, prev) : rbScene(ref, prev);
+  return withRefs(k === "list" ? listScene(ref, prev) : k === "hash" ? hashScene(ref, prev) : rbScene(ref, prev), ref.v);
 }
 
 export const stlAdapter: DataStructureAdapter = {
@@ -236,6 +246,6 @@ export const stlAdapter: DataStructureAdapter = {
   canHandle: (state) => collectStl(state).length > 0,
   interpret(state, _claims, opts) {
     const prev = state.prev ? new Map(collectStl(state.prev).map((r) => [r.id, r])) : null;
-    return collectStl(state).map((r) => (opts?.stlView?.[r.label] === "internal" && hasInternal(r.v) ? internalScene(r, prev?.get(r.id)) : logicalScene(r, prev?.get(r.id))));
+    return collectStl(state).map((r) => (opts?.stlView?.[r.label] === "internal" && hasInternal(r.v) ? internalScene(r, prev?.get(r.id)) : withRefs(logicalScene(r, prev?.get(r.id)), r.v)));
   },
 };

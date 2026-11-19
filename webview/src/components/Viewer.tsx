@@ -32,7 +32,8 @@ export function Viewer(p: ViewerProps) {
     return () => window.removeEventListener("keydown", k);
   });
   if (!state) return <div className="note">The program ran, but no line of this file was executed. {p.programOutput && <pre>{p.programOutput}</pre>}</div>;
-  const pickNode = (id: string | null) => { setSel(id); if (id) setTab("inspect"); };
+  // A pointer cell selects its pointee when that object is drawn in some scene, else the cell itself.
+  const pickNode = (id: string | null, fallback?: string) => { const shown = id !== null && scenes.some((s) => s.nodes.some((n) => n.id === id)); setSel(id === null ? null : shown ? id : fallback ?? id); if (id) setTab("inspect"); };
   return (
     <div className="layout">
       <SourcePanel sources={p.sources} file={state.file} line={state.line} executed={state.cause ? { file: state.cause.file, line: state.cause.line } : null} />
