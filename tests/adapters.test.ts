@@ -8,7 +8,7 @@ import { findings } from "../core/analysis/findings.ts";
 const printed = (o: string) => o.trim().split(/\s+/);
 
 test("INVARIANT: every drawn heap edge exists in the observed pointer data (all examples, all steps)", async () => {
-  const files = ["linked-lists/list.cpp", "linked-lists/singly.cpp", "linked-lists/malloc_list.cpp", "linked-lists/doubly.cpp", "linked-lists/sentinel.cpp", "linked-lists/shared_ptr_list.cpp", "binary-trees/unique_ptr_tree.cpp", "graphs/dfs_ptr.cpp", "arrays/union_find.cpp", "binary-trees/bst.cpp", "binary-trees/avl.cpp", "binary-trees/rbtree.cpp",
+  const files = ["linked-lists/list.cpp", "linked-lists/singly.cpp", "linked-lists/malloc_list.cpp", "linked-lists/doubly.cpp", "linked-lists/sentinel.cpp", "linked-lists/shared_ptr_list.cpp", "binary-trees/unique_ptr_tree.cpp", "binary-trees/shared_tree.cpp", "graphs/dfs_ptr.cpp", "arrays/union_find.cpp", "binary-trees/bst.cpp", "binary-trees/avl.cpp", "binary-trees/rbtree.cpp",
     "hash-tables/chained.cpp", "tries/trie.cpp", "stacks-queues/stack_queue.cpp",
     "stl/map.cpp", "stl/set.cpp", "stl/list.cpp", "stl/deque.cpp", "stl/unordered_map.cpp", "stl/custom_alloc.cpp",
     "c/singly.c", "c/bst.c", "c/dynarray.c", "c/hash.c"];
@@ -243,4 +243,25 @@ test("union-find arrays: following the drawn parent array reproduces the printed
   const parent = sc.nodes.map((n) => Number(n.label));
   const root = (x: number) => { while (parent[x] !== x) x = parent[x]!; return x; };
   assert.deepEqual(parent.map((_, i) => String(root(i))), printed(l.output));
+});
+
+test("make_shared: the node inside the control block is drawn as a normal heap object; tree equals the output; no leak, no control-block noise; freed at the end", async () => {
+  const l = await load("binary-trees/shared_tree.cpp");
+  const i = stepAt(l, "inorder(root);");
+  const scs = scenesAt(l, i).scenes;
+  const sc = scs.find((s) => s.kind === "binary-tree")!;
+  assert.ok(sc); assert.equal(sc.nodes.length, 6); assert.equal(sc.edges.length, 5);
+  assert.deepEqual(inorder(sc, ptrTarget(sc, "root")), printed(l.output));
+  assert.deepEqual(scs.filter((s) => s.kind === "generic"), [], "control blocks are not drawn as stray objects");
+  assert.equal(findings(l.history, l.lines).filter((f) => f.code === "leak").length, 0);
+  const last = l.history.stateAt(l.history.length - 1);
+  assert.ok(Object.values(last.objects).filter((o) => o.type === "Node").every((o) => o.state === "FREED"), "all nodes freed when root goes out of scope");
+  assert.equal(Object.values(last.objects).filter((o) => o.type === "Node").length, 6);
+});
+
+test("make_shared list with weak_ptr back links: both directions drawn, chain equals the output", async () => {
+  const l = await load("linked-lists/shared_ptr_list.cpp");
+  const sc = scenesAt(l, stepAt(l, "for (auto n = head; n; n = n->next) std::printf")).scenes.find((s) => s.kind === "doubly-linked-list")!;
+  assert.ok(sc); assert.deepEqual(chain(sc, ptrTarget(sc, "head")), printed(l.output));
+  assert.equal(sc.edges.filter((e) => e.kind === "prev").length, 3);
 });

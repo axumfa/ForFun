@@ -18,6 +18,7 @@ LOG = E["DSV_ALLOC_LOG"]
 open(LOG, "w").close()
 
 allocs = {}        # base -> {"size", "state"}
+children = {}      # base of a make_shared control block -> synthetic allocations of the T objects living inside it (see register_inplace)
 known = {}         # base -> gdb.Type of element/struct (learned the first time a typed pointer reaches it)
 double_frees = []
 logpos = 0
@@ -40,7 +41,7 @@ def read_log():
         p = ln.split()
         if len(p) < 2: continue
         a = int(p[1], 16)
-        if p[0] == "A": allocs[a] = {"size": int(p[2]), "state": "LIVE"}; known.pop(a, None)
+        if p[0] == "A": drop_children(a); allocs[a] = {"size": int(p[2]), "state": "LIVE"}; known.pop(a, None)
         elif p[0] == "R":     # realloc: R old new size. The learned type follows the block, whether it grew in place or moved.
             new = int(p[2], 16); ty = known.get(a) if a else None
             if a and a != new and a in allocs: allocs[a]["state"] = "FREED"      # moved: the old block is freed (keeps its type, like free())
@@ -50,14 +51,36 @@ def read_log():
         elif p[0] == "F":
             if a in allocs and allocs[a]["state"] == "FREED": double_frees.append(hx(a))
             if a in allocs: allocs[a]["state"] = "FREED"
+            for c in children.get(a, ()):
+                if c in allocs: allocs[c]["state"] = "FREED"
+
+def drop_children(b):
+    for c in children.pop(b, ()): allocs.pop(c, None); known.pop(c, None)
 
 def find_alloc(addr):
-    stale = (None, None)
+    """Innermost live allocation containing addr (a make_shared object nests inside its control block); else a freed one (live wins over stale: freed blocks may overlap reused memory)."""
+    best = stale = (None, None)
     for b, i in allocs.items():
         if b <= addr < b + max(i["size"], 1):
-            if i["state"] == "LIVE": return b, i
-            if stale[0] is None: stale = (b, i)     # a freed block may overlap memory reused by a live one: live wins
-    return stale
+            if i["state"] == "LIVE":
+                if best[0] is None or i["size"] < best[1]["size"]: best = (b, i)
+            elif stale[0] is None or i["size"] < stale[1]["size"]: stale = (b, i)
+    return best if best[0] is not None else stale
+
+SP_RE = re.compile(r"^std::(?:__cxx11::)?(?:shared_ptr|weak_ptr|__shared_ptr|__weak_ptr)<")
+def register_inplace(v):
+    """`std::make_shared<T>` allocates ONE block (the control block with T inside). The shim sees that block, not T. When a shared/weak_ptr's `_M_ptr` points strictly inside its own
+    control block (`_M_refcount._M_pi`), T gets a synthetic allocation of its own, so pointers to it are ordinary exact pointers and it is drawn like any heap object.
+    Its state follows the block (freed when the block is freed; note T's destructor may have run while weak_ptrs keep the block alive: contents are then stale)."""
+    try:
+        p = int(v["_M_ptr"]); pi = int(v["_M_refcount"]["_M_pi"])
+        if not p or not pi or p == pi or p in allocs: return
+        info = allocs.get(pi)
+        if info is None or info["state"] != "LIVE": return
+        size = v["_M_ptr"].type.strip_typedefs().target().strip_typedefs().sizeof
+        if size <= 0 or not (pi < p and p + size <= pi + info["size"]): return
+        allocs[p] = {"size": size, "state": "LIVE"}; children.setdefault(pi, []).append(p)
+    except Exception: pass
 
 def classify(addr):
     if addr == 0: return "null", None, 0
@@ -109,7 +132,7 @@ STL_RE = re.compile(r"^std::(?:__cxx11::)?(map|multimap|set|multiset|unordered_m
 MAPLIKE = ("map", "multimap", "unordered_map", "unordered_multimap")
 # Iterator locals (`auto it = m.begin()`) hold pointers to libstdc++'s own node types; those blocks belong to the container (read by its
 # reader) and must not turn into stray "pointer graph" objects of their own.
-INTERNAL_NODE_RE = re.compile(r"^std::(_Rb_tree_node|_List_node|__detail::_List_node|__detail::_Hash_node|_Deque_)")
+INTERNAL_NODE_RE = re.compile(r"^std::(_Rb_tree_node|_List_node|__detail::_List_node|__detail::_Hash_node|_Deque_|_Sp_counted)")
 # Their iterators (`it`, a range-for's hidden `__begin`) point into node/chunk storage owned by the container: shown as text, not walked.
 ITER_RE = re.compile(r"^std::(_Rb_tree_(const_)?iterator|_List_(const_)?iterator|_Deque_iterator|__detail::_Node_(const_)?iterator)<")
 class Unavailable(Exception): pass
@@ -382,6 +405,7 @@ def read_val(v, objs, depth=0):
             return r
         n = t.name or tname(v.type)
         if t.code == gdb.TYPE_CODE_STRUCT and ITER_RE.match(n): return str(v)[:200]
+        if t.code == gdb.TYPE_CODE_STRUCT and SP_RE.match(n): register_inplace(v)
         if t.code == gdb.TYPE_CODE_STRUCT and depth < 6 and stl_kind(t): return read_stl(v, t, stl_kind(t), objs, depth)
         if t.code == gdb.TYPE_CODE_STRUCT and is_vector(t) and depth < 6:
             st, fi = v["_M_impl"]["_M_start"], v["_M_impl"]["_M_finish"]
