@@ -7,7 +7,7 @@ import type { Scene } from "../core/models/scene.ts";
 
 export const root = path.resolve(import.meta.dirname, "..");
 export const cfg: RunnerConfig = { engineDir: path.join(root, "engine"), compiler: "g++", gdb: "gdb", std: "c++17", extraFlags: [],
-  compileTimeoutMs: 30000, runTimeoutMs: 60000, maxSteps: 20000, maxOutputBytes: 1 << 20, maxMemoryMB: 0, isolateNetwork: false };
+  compileTimeoutMs: 30000, runTimeoutMs: 60000, maxSteps: 20000, maxOutputBytes: 1 << 20, maxMemoryMB: 0, isolateNetwork: false, sandbox: "auto" };
 
 export interface Loaded { history: History; output: string; source: string; lines: string[]; file: string; }
 const cache = new Map<string, Promise<Loaded>>();

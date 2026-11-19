@@ -95,6 +95,12 @@
           "default": 4096,
           "description": "Virtual-memory cap (MB) for the traced process tree. 0 = unlimited."
         },
+        "dsv.sandbox": {
+          "type": "string",
+          "enum": ["auto", "off"],
+          "default": "auto",
+          "description": "auto: run the traced program inside bubblewrap when it is installed and works (read-only filesystem, private /tmp, $HOME hidden, no network). Falls back to isolateNetwork-only otherwise."
+        },
         "dsv.isolateNetwork": {
           "type": "boolean",
           "default": true,

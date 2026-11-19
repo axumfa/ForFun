@@ -15,7 +15,7 @@ export function readConfig(ctx: vscode.ExtensionContext, entry?: { setup: string
     cCompiler: c.get("cCompiler", "gcc"), cStd: c.get("cStd", "c11"), extraCFlags: c.get<string[]>("extraCFlags", []),
     compileTimeoutMs: c.get("compileTimeoutMs", 60000), runTimeoutMs: c.get("runTimeoutMs", 60000),
     maxSteps: c.get("maxSteps", 20000), maxOutputBytes: 1 << 20,
-    maxMemoryMB: c.get("maxMemoryMB", 4096), isolateNetwork: c.get("isolateNetwork", true), entry,
+    maxMemoryMB: c.get("maxMemoryMB", 4096), isolateNetwork: c.get("isolateNetwork", true), sandbox: c.get<"off" | "auto">("sandbox", "auto"), entry,
   };
 }
 

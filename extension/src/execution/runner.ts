@@ -19,6 +19,8 @@ export interface RunnerConfig {
   maxOutputBytes: number;
   maxMemoryMB: number;      // virtual-memory cap for the whole tracing process tree (0 = unlimited)
   isolateNetwork: boolean;  // run inside a new network namespace when the OS allows it
+  /** "auto": run the traced program inside bubblewrap when it works (read-only filesystem, private /tmp, $HOME hidden, no network/IPC/PID sharing). Absent = "off". */
+  sandbox?: "off" | "auto";
   /** Optional driver: C/C++ statements run from a generated main() that includes the source (renamed main -> __dsv_user_main). */
   entry?: { setup: string };
 }
@@ -29,16 +31,32 @@ export class RunnerError extends Error {}
 const NETNS_OK = (() => { try { return spawnSync("unshare", ["-r", "-n", "true"], { stdio: "ignore" }).status === 0; } catch { return false; } })();
 export const networkIsolationAvailable = NETNS_OK;
 
+/** True when bubblewrap can create the namespaces we need (probed once, with the same flags as the real run). */
+const BWRAP_OK = (() => { try { return spawnSync("bwrap", ["--unshare-all", "--die-with-parent", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "true"], { stdio: "ignore" }).status === 0; } catch { return false; } })();
+export const sandboxAvailable = BWRAP_OK;
+
+/**
+ * bwrap prefix for the traced program. Everything is read-only except `work`; /tmp is private; $HOME is an empty tmpfs except the directories the run must read
+ * (`allowRead`: the engine and the source). Not a security boundary against kernel bugs, but a program can no longer write outside `work`, read dotfiles/keys in $HOME, or use the network.
+ */
+export function bwrapArgs(work: string, allowRead: string[]): string[] {
+  const home = process.env.HOME, a = ["bwrap", "--unshare-all", "--die-with-parent", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp"];
+  if (home && home !== "/" && fs.existsSync(home)) a.push("--tmpfs", home);
+  for (const d of new Set(allowRead)) if (fs.existsSync(d) && !work.startsWith(d + path.sep)) a.push("--ro-bind", d, d);
+  a.push("--bind", work, work, "--chdir", work);
+  return a;
+}
+
 interface Exec { code: number | null; stdout: string; stderr: string; timedOut: boolean; }
 
 /** Run a command in its own process group with a wall-clock timeout and a bounded output buffer. */
 function exec(cmd: string, args: string[], opts: { cwd: string; env?: NodeJS.ProcessEnv; timeoutMs: number; maxBytes: number;
-  cpuSeconds?: number; memoryMB?: number; isolateNetwork?: boolean; signal?: AbortSignal }): Promise<Exec> {
+  cpuSeconds?: number; memoryMB?: number; isolateNetwork?: boolean; wrap?: string[]; signal?: AbortSignal }): Promise<Exec> {
   return new Promise((resolve, reject) => {
     // `ulimit -t` bounds CPU time of the whole tree; "$@" keeps args out of shell parsing.
     const lim = [`ulimit -t ${opts.cpuSeconds ?? 600}`, ...(opts.memoryMB ? [`ulimit -v ${opts.memoryMB * 1024}`] : [])].join("; ");
     const sh = `${lim}; exec "$@"`;
-    const pre = opts.isolateNetwork && NETNS_OK ? ["unshare", "-r", "-n"] : [];
+    const pre = opts.wrap ?? (opts.isolateNetwork && NETNS_OK ? ["unshare", "-r", "-n"] : []);
     const child = spawn("sh", ["-c", sh, "sh", ...pre, cmd, ...args], { cwd: opts.cwd, env: opts.env ?? process.env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "", stderr = "", timedOut = false;
     const cap = (s: string, d: Buffer) => (s.length < opts.maxBytes ? s + d.toString("utf8") : s);
@@ -54,7 +72,7 @@ function exec(cmd: string, args: string[], opts: { cwd: string; env?: NodeJS.Pro
   });
 }
 
-export interface RunResult { trace: Trace; programOutput: string; log: string; traceBytes: number; sources: Record<string, string>; }
+export interface RunResult { trace: Trace; programOutput: string; log: string; traceBytes: number; sandbox: "bwrap" | "netns" | "none"; sources: Record<string, string>; }
 
 /** C for `.c`; everything else (.cpp .cc .cxx .C, and anything unknown) is C++. The comparison is case-sensitive: `.C` is C++. */
 export type Lang = "c" | "c++";
@@ -98,8 +116,10 @@ export async function runTrace(sourceFile: string, cfg: RunnerConfig, workRoot =
     const env: NodeJS.ProcessEnv = { ...process.env, DSV_SRC: sourceFile, DSV_OUT: traceOut, DSV_ALLOC_LOG: path.join(work, "alloc.log"),
       DSV_SHIM: shim, DSV_PROG_OUT: progOut, DSV_MAX_STEPS: String(cfg.maxSteps) };
     if (driverPath) env.DSV_DRIVER = driverPath;
+    const boxed = cfg.sandbox === "auto" && BWRAP_OK;
+    const wrap = boxed ? bwrapArgs(work, [cfg.engineDir, path.dirname(sourceFile)]) : undefined;
     const r = await exec(cfg.gdb, ["-q", "-batch", "-x", path.join(cfg.engineDir, "debugger", "gdb_tracer.py"), "--args", prog],
-      { ...lim, env, timeoutMs: cfg.runTimeoutMs, cpuSeconds: Math.ceil(cfg.runTimeoutMs / 1000) + 5, isolateNetwork: cfg.isolateNetwork });
+      { ...lim, env, timeoutMs: cfg.runTimeoutMs, cpuSeconds: Math.ceil(cfg.runTimeoutMs / 1000) + 5, isolateNetwork: cfg.isolateNetwork, wrap });
     const raw = fs.existsSync(traceOut) ? fs.readFileSync(traceOut, "utf8") : "";
     if (!raw) {
       if (r.timedOut) throw new RunnerError(`execution timed out after ${cfg.runTimeoutMs} ms before the first step`);
@@ -113,7 +133,7 @@ export async function runTrace(sourceFile: string, cfg: RunnerConfig, workRoot =
     const programOutput = fs.existsSync(progOut) ? fs.readFileSync(progOut, "utf8").slice(0, cfg.maxOutputBytes) : "";
     const sources: Record<string, string> = { main: fs.readFileSync(sourceFile, "utf8") };
     if (driverText) sources.driver = driverText;
-    return { trace, programOutput, log: r.stderr, traceBytes: raw.length, sources };
+    return { trace, programOutput, log: r.stderr, traceBytes: raw.length, sandbox: boxed ? "bwrap" : cfg.isolateNetwork && NETNS_OK ? "netns" : "none", sources };
   } finally {
     fs.rmSync(work, { recursive: true, force: true });
   }

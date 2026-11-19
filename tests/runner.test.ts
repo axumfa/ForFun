@@ -105,3 +105,67 @@ test("memory limit turns a huge allocation into a reported failure, not a hang",
   const { trace } = await runTrace(p, { ...cfg, maxMemoryMB: 1500 });
   assert.ok(trace.end?.reason === "exited" && trace.end.exitCode === 7 || trace.end?.reason === "crashed", JSON.stringify(trace.end));
 });
+
+// ---- sandbox (bubblewrap) ----------------------------------------------------------------------------------------------------------------
+import { sandboxAvailable, bwrapArgs } from "../extension/src/execution/runner.ts";
+import * as net from "node:net";
+
+const HOSTILE = (target: string, home: string) => `
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+int main() {
+  int a = 0, b = 0, c = 0, d = 0;
+  FILE* f = std::fopen("${target}", "w");            // write outside the work directory
+  if (f) { std::fputs("x", f); std::fclose(f); a = 1; }
+  FILE* g = std::fopen("${home}/.dsv-secret", "r");   // read a file in $HOME
+  if (g) { std::fclose(g); b = 1; }
+  int s = socket(AF_INET, SOCK_STREAM, 0);            // reach a listener on loopback
+  sockaddr_in sa; std::memset(&sa, 0, sizeof sa); sa.sin_family = AF_INET; sa.sin_port = htons(PORT); inet_pton(AF_INET, "127.0.0.1", &sa.sin_addr);
+  if (s >= 0 && connect(s, (sockaddr*)&sa, sizeof sa) == 0) c = 1;
+  FILE* t = std::fopen("/tmp/dsv-sandbox-leak", "w");   // private /tmp
+  if (t) { std::fclose(t); d = 1; }
+  std::printf("%d %d %d %d\\n", a, b, c, d);
+  return 0;
+}`;
+
+test("sandbox: writes outside the work dir, $HOME reads and the network are blocked; the trace is still complete", { skip: !sandboxAvailable && "bwrap not usable here" }, async () => {
+  const home = process.env.HOME!, secret = path.join(home, ".dsv-secret"), outside = path.join(os.tmpdir(), "dsv-outside-" + process.pid), leak = "/tmp/dsv-sandbox-leak";
+  const server = net.createServer().listen(0, "127.0.0.1"); await new Promise((r) => server.once("listening", r));
+  const port = (server.address() as net.AddressInfo).port;
+  fs.writeFileSync(secret, "secret"); fs.rmSync(leak, { force: true });
+  try {
+    const file = src("hostile.cpp", HOSTILE(outside, home).replace("htons(PORT)", `htons(${port})`));
+    const open = await runTrace(file, { ...cfg, sandbox: "off" });
+    assert.equal(open.sandbox, "none"); assert.equal(open.programOutput.trim(), "1 1 1 1", "control: without the sandbox the hostile program succeeds at all four");
+    fs.rmSync(outside, { force: true }); fs.rmSync(leak, { force: true });
+    const boxed = await runTrace(file, { ...cfg, sandbox: "auto" });
+    assert.equal(boxed.sandbox, "bwrap");
+    assert.equal(boxed.trace.end?.reason, "exited");
+    assert.equal(boxed.programOutput.trim(), "1 0 0 1", "writes anywhere succeed only in private places; $HOME file and the network are unreachable");
+    assert.ok(!fs.existsSync(outside) && !fs.existsSync(leak), "nothing escaped to the real /tmp");
+  } finally { server.close(); fs.rmSync(secret, { force: true }); fs.rmSync(outside, { force: true }); fs.rmSync(leak, { force: true }); }
+});
+
+test("sandbox: a normal example traces identically inside and outside it", { skip: !sandboxAvailable && "bwrap not usable here" }, async () => {
+  const f = path.join(root, "examples/stl/map.cpp");
+  process.env.DSV_NO_DELTA = "0";
+  try {
+    const a = await runTrace(f, { ...cfg, sandbox: "off" }), b = await runTrace(f, { ...cfg, sandbox: "auto" });
+    assert.equal(b.sandbox, "bwrap"); assert.equal(a.programOutput, b.programOutput);
+    assert.equal(a.trace.steps.length, b.trace.steps.length);
+    assert.deepEqual(a.trace.steps.map((s) => [s.fn, s.line, s.events.length]), b.trace.steps.map((s) => [s.fn, s.line, s.events.length]));
+  } finally { delete process.env.DSV_NO_DELTA; }
+});
+
+test("bwrapArgs: work dir is the only writable bind; allowRead dirs are read-only; no network/pid/ipc sharing", () => {
+  const a = bwrapArgs("/tmp/dsv-x", [root]);
+  assert.ok(a.includes("--unshare-all") && a.includes("--die-with-parent"));
+  const binds = a.flatMap((x, i) => (x === "--bind" ? [a[i + 1]] : []));
+  assert.deepEqual(binds, ["/tmp/dsv-x"]);
+  assert.ok(a.some((x, i) => x === "--ro-bind" && a[i + 1] === "/") && a.some((x, i) => x === "--ro-bind" && a[i + 1] === root));
+});

@@ -108,3 +108,6 @@ Decisions made during implementation:
 
 Test strategy: every example prints its own final structure; tests assert the *drawn* scene equals the printed output, plus an invariant test
 that no drawn edge lacks a corresponding observed pointer at any step of any example.
+
+- **D16** The traced run is wrapped in `bwrap` (`dsv.sandbox: auto`): the program, gdb and the shim run read-only except the work dir, with a private `/tmp`, hidden `$HOME` and no network. The compile step is not wrapped (it needs the user's include paths). Fallback: `unshare -r -n`, then nothing.
+- **D17** Trace schema v4 delta-encodes frames in the tracer (`encode_frames`, structural patches `vdiff`) and expands them in `parseTrace`, so everything downstream sees full frames. Smart pointers are normalised to the raw pointer they hold in the same place (`normalizeSmartPointers`).

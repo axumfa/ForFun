@@ -33,8 +33,12 @@ intrusive lists) may be classified as `generic` or with low confidence. Heap vs.
 Index markers on arrays are integer variables with index-like names.
 
 **Security**: user code is compiled and run. Protections: separate process group, wall-clock timeout, CPU `ulimit -t`, address-space `ulimit -v`
-(`dsv.maxMemoryMB`), output caps, step cap, and a new network namespace when `unshare -r -n` works (probed at startup). This is **not a sandbox**:
-the program can still read/write files as your user. Only trace code you trust. Stronger isolation (bubblewrap/containers) is future work.
+(`dsv.maxMemoryMB`), output caps, step cap, and, for the **traced run** (`dsv.sandbox: auto`, default), bubblewrap when it is installed and works (probed once at startup):
+read-only filesystem, private `/tmp`, `$HOME` replaced by an empty tmpfs (the engine and the source's directory stay readable), and new network/PID/IPC/UTS/user namespaces,
+so the program cannot write outside its work directory, read dotfiles or keys in `$HOME`, or reach the network (tested with a hostile program). Without `bwrap` (not installed, or
+unprivileged user namespaces disabled, e.g. Ubuntu 24.04 AppArmor default) it falls back to a new network namespace via `unshare -r -n` (`dsv.isolateNetwork`), and if that fails to nothing.
+**Still not a hard boundary**: no seccomp filter, the rest of the filesystem is world-readable to the user (`/etc`, `/var`, other users' readable files), the *compile* step is not sandboxed
+(`#include "/path"` can read files into diagnostics), and a kernel/namespace escape defeats it. Only trace code you trust.
 
 **Analysis**: static complexity estimates are regex-level and labelled as estimates. Findings (leak, dangling, crash) come from the recorded run only.
 No LLM is used; `ExplanationProvider` is the extension point, and providers receive only recorded facts.
