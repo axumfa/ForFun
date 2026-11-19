@@ -280,6 +280,40 @@ def attach_hash(v, t, maplike, size, r, kids):
     except (Unavailable, NotTracked) as e: r["internal"] = None; r["internalError"] = str(e)
     except gdb.error as e: r["internal"] = None; r["internalError"] = "walk failed: %s" % e
 
+def attach_deque(v, t, size, r, kids):
+    """std::deque: a map (array) of fixed-size chunks; elements run from start._M_cur in the first chunk to finish._M_cur in the last. Elements never move on push/pop at the ends,
+    so the element address is the identity. Validated: count from the iterators == size(), chunks are live allocations of the expected size, printer addresses agree."""
+    try:
+        if size > MAX_STL: raise Unavailable("%d elements: the internal view needs at most %d" % (size, MAX_STL))
+        if not str(t.template_argument(1)).startswith("std::allocator<"): raise Unavailable("allocator is not std::allocator")
+        if len(r["entries"]) != size: raise Unavailable("pretty-printer yielded %d entries for size() %d" % (len(r["entries"]), size))
+        im = v["_M_impl"]; esz = t.template_argument(0).sizeof
+        if esz <= 0: raise Unavailable("element size unknown")
+        n = 512 // esz if esz < 512 else 1
+        st, fn = im["_M_start"], im["_M_finish"]
+        s_cur, s_first, s_last, s_node = (int(st[k]) for k in ("_M_cur", "_M_first", "_M_last", "_M_node"))
+        f_cur, f_first, f_last, f_node = (int(fn[k]) for k in ("_M_cur", "_M_first", "_M_last", "_M_node"))
+        cnt = (f_node - s_node) // 8 + 1
+        if cnt < 1 or cnt > 4096 or (f_node - s_node) % 8: raise Unavailable("chunk map span %d is implausible" % cnt)
+        if s_last - s_first != n * esz or f_last - f_first != n * esz: raise Unavailable("chunk size disagrees with the element size")
+        total = (f_cur - s_cur) // esz if cnt == 1 else (cnt - 2) * n + (f_cur - f_first) // esz + (s_last - s_cur) // esz
+        if total != size: raise Unavailable("iterators describe %d elements but size() is %d" % (total, size))
+        raw = mem(s_node, 8 * cnt); chunks = [int.from_bytes(raw[8 * j:8 * j + 8], sys.byteorder) for j in range(cnt)]
+        for c in chunks:
+            live_node(c)
+            if allocs[c]["size"] < n * esz: raise Unavailable("a chunk is smaller than expected")
+        if chunks[0] != s_first or chunks[-1] != f_first: raise Unavailable("map entries disagree with the iterators")
+        off = (s_cur - s_first) // esz
+        ids = [chunks[(off + i) // n] + ((off + i) % n) * esz for i in range(size)]
+        for a, (k, x) in zip(ids, kids):
+            try: ca = int(x.address)
+            except Exception: continue
+            if ca != a: raise Unavailable("chunk walk disagrees with the pretty-printer")
+        for e, a in zip(r["entries"], ids): e["id"] = hx(a)
+        r["internal"] = {"kind": "deque", "chunk": n, "offset": off, "chunks": [hx(c) for c in chunks]}; r["source"] = "walk"
+    except (Unavailable, NotTracked) as e: r["internal"] = None; r["internalError"] = str(e)
+    except gdb.error as e: r["internal"] = None; r["internalError"] = "walk failed: %s" % e
+
 def printer_size(vis):
     try:
         txt = str(vis.to_string()); m = re.search(r"with (\d+) element", txt)
@@ -372,6 +406,7 @@ def read_stl(v, t, kind, objs, depth):
             r["entries"] = [entry(kv, objs, depth, maplike) for kv in kids]
             r["source"] = "printer"
             if kind.startswith("unordered") and size is not None: attach_hash(v, t, maplike, size, r, kids)
+            elif kind == "deque" and size is not None: attach_deque(v, t, size, r, kids)
             if size is None: r["size"] = len(r["entries"])
             return r
         except Exception as e: why = "pretty-printer failed: %s" % e

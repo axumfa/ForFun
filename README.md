@@ -15,7 +15,7 @@ The UI only draws relationships that were observed in memory; it never guesses o
 ## Recognised structures
 Arrays, vectors, singly/doubly linked lists, stacks, queues (list- or array-based), binary trees/BST/AVL/red-black (colour from an enum or
 bool field), binary heaps (array/vector named like a heap), hash tables with chaining, graphs (adjacency list/matrix or node with a neighbour
-vector, `std::vector<T*>` cells click through to their nodes), tries, STL containers (`map set multimap multiset list deque unordered_*` — a logical view and, for all but `deque`, an internal view: red-black tree, list nodes, bucket chains), smart pointers (`unique_ptr`/`shared_ptr`/`weak_ptr`/`make_shared` are followed like raw pointers), and a generic pointer-graph fallback. Each scene shows a **confidence** and the reason for the classification
+vector, `std::vector<T*>` cells click through to their nodes), tries, STL containers (`map set multimap multiset list deque unordered_*` — a logical view and an internal view: red-black tree, list nodes, bucket chains, deque chunks), smart pointers (`unique_ptr`/`shared_ptr`/`weak_ptr`/`make_shared` are followed like raw pointers), and a generic pointer-graph fallback. Each scene shows a **confidence** and the reason for the classification
 (hover). Edges are always observed pointer values; classification is a heuristic.
 
 ## Requirements and settings

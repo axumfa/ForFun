@@ -195,9 +195,55 @@ test("internal view: multimap duplicates are separate tree nodes; truncated and 
   assert.equal(c.views!.internal, false); assert.match(c.views!.reason!, /allocator/);
 });
 
-test("deque has no internal view: no Logical | Internal switch", async () => {
+const DSETUP = "std::deque<long long> dq;\nfor (int i = 0; i < 100; i++) dq.push_back(i);\nfor (int i = 1; i <= 30; i++) dq.push_front(-i);\ndq.pop_back();\ndq.pop_front();\nint done = 1;";
+const DINT = { stlView: { dq: "internal", d: "internal" } } as const;
+
+test("deque internal view: elements sit esz apart inside a chunk, chunks hold exactly 64 long longs, order equals the logical order, at every step", async () => {
+  const l = await load("stl/deque.cpp", DSETUP);
+  let seen = 0;
+  for (let i = 0; i < l.history.length; i++) {
+    const st = l.history.stateAt(i), r = collectStl(st).find((x) => x.label === "dq");
+    if (!r || r.v.internal?.kind !== "deque") continue;
+    seen++;
+    const d = r.v.internal, ids = r.v.entries.map((e) => BigInt(e.id!));
+    assert.equal(d.chunk, 64, "512 bytes / 8");
+    ids.forEach((a, k) => { if (k && (d.offset + k) % d.chunk !== 0) assert.equal(a - ids[k - 1]!, 8n, `@${i} element ${k} follows ${k - 1} in the same chunk`); });
+    ids.forEach((a, k) => { const c = BigInt(d.chunks[Math.floor((d.offset + k) / d.chunk)]!); assert.equal(a, c + BigInt(((d.offset + k) % d.chunk) * 8), `@${i} element ${k} address = chunk + slot*8`); });
+    assert.equal(d.chunks.length, Math.floor((d.offset + r.v.size) / d.chunk) + 1, `@${i}: finish._M_cur never equals _M_last, so an exactly full last chunk already has its successor (an empty deque owns one chunk)`);
+    const sc = interpret(st, undefined, DINT).scenes.find((x) => x.views?.key === "dq")!;
+    assert.equal(sc.views!.current, "internal");
+    const boxes = sc.nodes.filter((n) => n.shape === "box").sort((x, y) => x.index! - y.index!);
+    assert.deepEqual(boxes.map((n) => n.label), r.v.entries.map((e) => String(e.value)), `@${i}: drawn order == logical order`);
+    assert.equal(sc.nodes.filter((n) => n.shape === "cell").length, r.v.size ? Math.ceil((d.offset + r.v.size) / d.chunk) : 0, `@${i}: one map entry per chunk that holds elements`);
+    const idset = new Set(sc.nodes.map((n) => n.id)); for (const e of sc.edges) assert.ok(idset.has(e.from) && idset.has(e.to), `@${i}`);
+  }
+  assert.ok(seen > 100, `internal view existed for most steps (${seen})`);
+});
+
+test("deque identity: push/pop at either end never changes the ids of the surviving elements; only the new element is 'created'", async () => {
+  const l = await load("stl/deque.cpp", DSETUP);
+  let prev: Map<string, string> | null = null, checked = 0;
+  for (let i = 0; i < l.history.length; i++) {
+    const r = collectStl(l.history.stateAt(i)).find((x) => x.label === "dq" && x.v.internal?.kind === "deque");
+    if (!r) { prev = null; continue; }
+    const cur = new Map(r.v.entries.map((e) => [String(e.value), e.id!] as const));
+    if (prev) for (const [val, id] of cur) if (prev.has(val)) { assert.equal(id, prev.get(val), `@${i}: element ${val} moved`); checked++; }
+    prev = cur;
+  }
+  assert.ok(checked > 1000);
+  const end = Array.from({ length: l.history.length }, (_, i) => i).find((i) => collectStl(l.history.stateAt(i)).some((r) => r.label === "dq" && r.v.size === 128))!;
+  const sc = scenesAt(l, end, DINT).scenes.find((x) => x.views?.key === "dq")!;
+  assert.deepEqual(sc.nodes.filter((n) => n.status === "created").length <= 1, true);
+});
+
+test("deque internal view on a small int deque equals the program's output; refused above 200 elements with the reason", async () => {
   const l = await load("stl/deque.cpp");
-  for (const sc of scenesAt(l, finalStep(l), { stlView: { d: "internal" } }).scenes) assert.equal(sc.views, undefined);
+  const sc = scenesAt(l, stepAt(l, "for (int x : d) {"), DINT).scenes.find((x) => x.views?.key === "d")!;
+  assert.equal(sc.views!.current, "internal");
+  assert.deepEqual(sc.nodes.filter((n) => n.shape === "box").sort((a, b) => a.index! - b.index!).map((n) => n.label), printed(l.output));
+  const big = await load("stl/deque.cpp", "std::deque<int> dq;\nfor (int i = 0; i < 300; i++) dq.push_back(i);\nint done = 1;");
+  const b = scenesAt(big, big.history.length - 3, DINT).scenes.find((x) => x.views?.key === "dq")!;
+  assert.equal(b.views!.internal, false); assert.match(b.views!.reason!, /300 elements/);
 });
 
 // ---- internal view (std::list) -----------------------------------------------------------------------------------------------------

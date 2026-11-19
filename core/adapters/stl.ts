@@ -88,14 +88,14 @@ export function logicalScene(ref: StlRef, prev: StlRef | undefined): Scene {
     s.notes.push(`Showing the first ${i} of ${v.size} elements (limit ${i}); the rest are counted but not read.`);
   }
   if (v.bucketCount !== undefined) s.notes.push(`bucket_count = ${v.bucketCount}; elements are listed in the container's iteration order.`);
-  else if (v.container === "deque") s.notes.push("Logical view only: elements by position (a deque's chunk layout is not drawn).");
+  else if (v.container === "deque") s.notes.push("Elements by position; the Internal view shows the chunk layout.");
   else if (v.source !== "walk" && v.internalError) s.notes.push(`Internal view unavailable: ${v.internalError}.`);
   fit(s); return s;
 }
 
 /** Which internal views exist. Only containers that have a node walk offer the switch; it is disabled (with the reason) when the walk was refused or truncated. */
-const WALKABLE = new Set(["map", "multimap", "set", "multiset", "list", "unordered_map", "unordered_multimap", "unordered_set", "unordered_multiset"]);
-const hasInternal = (v: StlValue) => v.internal?.kind === "rb" || v.internal?.kind === "list" || v.internal?.kind === "hash";
+const WALKABLE = new Set(["map", "multimap", "set", "multiset", "list", "unordered_map", "unordered_multimap", "unordered_set", "unordered_multiset", "deque"]);
+const hasInternal = (v: StlValue) => v.internal?.kind === "rb" || v.internal?.kind === "list" || v.internal?.kind === "hash" || v.internal?.kind === "deque";
 function viewsOf(ref: StlRef, current: "logical" | "internal"): Scene["views"] {
   const v = ref.v;
   if (!WALKABLE.has(v.container) || v.source === "raw") return undefined;
@@ -225,6 +225,41 @@ function hashScene(ref: StlRef, prev: StlRef | undefined): Scene {
   fit(s); return s;
 }
 
+const PER_LINE = 14;
+/**
+ * Internal view of std::deque: the chunk map (`_M_map[r]` -> chunk r) and, per chunk, the slots in use. Elements live at fixed addresses (push/pop at the ends never moves them),
+ * which is the identity used for animation. The first chunk starts at slot `offset`; the last may be partly used; middle chunks are full. Validated by the tracer against size() and the printer.
+ */
+function dequeScene(ref: StlRef, prev: StlRef | undefined): Scene {
+  const v = ref.v, d = v.internal as { chunk: number; offset: number; chunks: string[] }, ids = entryIds(ref.id, v), n = d.chunk;
+  const s = newScene(ref.id, "sequence", `std::deque ${ref.label} — ${d.chunks.length} chunk${d.chunks.length === 1 ? "" : "s"} of ${n}, ${v.size} element${v.size === 1 ? "" : "s"}`, 1,
+    "chunk map and element slots read from memory (iterators validated against size() and the pretty-printer)");
+  s.views = viewsOf(ref, "internal");
+  const pv = prev && prev.v.internal?.kind === "deque" ? prev : undefined;
+  const was = pv ? new Map(entryIds(pv.id, pv.v).map((id, i) => [id, pv.v.entries[i]!] as const)) : null;
+  const oldEdges = new Set<string>();
+  if (pv) { const pd = pv.v.internal as { chunk: number; offset: number; chunks: string[] }, pids = entryIds(pv.id, pv.v);
+    pd.chunks.forEach((_, r) => { const k = r === 0 ? 0 : pd.chunk - pd.offset + (r - 1) * pd.chunk; if (pids[k]) oldEdges.add(edgeId(`${s.id}:c${r}`, "bucket", pids[k]!)); }); }
+  let y = 30, i = 0;
+  d.chunks.forEach((addr, r) => {
+    const lo = r === 0 ? d.offset : 0, used = Math.min(n - lo, v.size - i), first = ids[i];
+    if (used <= 0 || !first) return;
+    const hid = `${s.id}:c${r}`;
+    s.nodes.push({ id: hid, label: `map[${r}]`, sub: `slots ${lo}–${lo + used - 1}`, x: 40, y, w: 72, h: 40, shape: "cell", status: "live", tip: `chunk @${addr}` });
+    for (let k = 0; k < used; k++, i++) {
+      const e = v.entries[i]!, pe = was?.get(ids[i]!), main = compact(e.key !== undefined ? e.key : e.value);
+      s.nodes.push({ id: ids[i]!, label: clip(main, 8), x: 130 + (k % PER_LINE) * 58, y: y + Math.floor(k / PER_LINE) * 52, w: 52, h: 40, shape: "box", index: i, tip: `${compact(e.value)} @${ids[i]}`,
+        status: !was ? "live" : !pe ? "created" : JSON.stringify(pe.value) !== JSON.stringify(e.value) ? "changed" : "live" });
+    }
+    const eid = edgeId(hid, "bucket", first);
+    s.edges.push({ id: eid, from: hid, to: first, kind: "bucket", directed: true, changed: !!pv && !oldEdges.has(eid) });
+    y += Math.ceil(used / PER_LINE) * 52 + 14;
+  });
+  s.pointers = v.size ? [{ name: "begin", target: ids[0]!, state: "live" }, { name: "end−1", target: ids[v.size - 1]!, state: "live" }] : [];
+  s.notes.push("Each map[r] entry points at a fixed-size chunk. Elements keep their address when the deque grows or shrinks at either end; only the slots in use are drawn.");
+  fit(s); return s;
+}
+
 /** Elements that are (or, for maps, whose value is) a pointer to a tracked heap object get `ref`: the UI can jump to the pointee although no edge crosses scenes. */
 const refOfEntry = (e: StlEntry): string | undefined => {
   for (const x of [e.value, e.key]) if (isPtr(x) && x.kind === "object" && x.obj && !x.offset) return x.obj;
@@ -238,7 +273,7 @@ function withRefs(s: Scene, v: StlValue): Scene {
 /** Internal view of whichever kind the walk validated. */
 export function internalScene(ref: StlRef, prev: StlRef | undefined): Scene {
   const k = ref.v.internal?.kind;
-  return withRefs(k === "list" ? listScene(ref, prev) : k === "hash" ? hashScene(ref, prev) : rbScene(ref, prev), ref.v);
+  return withRefs(k === "list" ? listScene(ref, prev) : k === "hash" ? hashScene(ref, prev) : k === "deque" ? dequeScene(ref, prev) : rbScene(ref, prev), ref.v);
 }
 
 export const stlAdapter: DataStructureAdapter = {

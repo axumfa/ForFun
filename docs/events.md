@@ -29,7 +29,7 @@ ever see full frames. `DSV_NO_DELTA=1` makes the tracer write full frames (used 
   `source`: `walk` (map/set/list: the tracer walked the nodes and validated them; `id` = node address; `internal` is set unless truncated or invalid),
   `printer` (read lazily through libstdc++'s GDB pretty-printer; no ids), `raw` (neither: only `text` and `unavailable`).
   `n = [color 0 red | 1 black, parent, left, right]` are *indices into `entries`* (-1 none, -2 the header), present only when the whole red-black tree was walked and
-  every link cross-checked. `internal` is `{kind: rb, header, root}`, `{kind: list, header}` or `{kind: hash, buckets}` (`buckets[j]` = index into `entries` of bucket j's first node, -1 = empty; entries are in node-chain order and carry node `id`s; for `unordered_*` `source` is `walk` although the values come from the printer), otherwise `null` with `internalError` (custom allocator, layout mismatch,
+  every link cross-checked. `internal` is `{kind: rb, header, root}`, `{kind: list, header}` `{kind: hash, buckets}` or `{kind: deque, chunk, offset, chunks}` (`chunk` = elements per chunk, `offset` = slot of the first element in `chunks[0]`, `chunks` = chunk addresses; entry `id` = element address; `buckets[j]` = index into `entries` of bucket j's first node, -1 = empty; entries are in node-chain order and carry node `id`s; for `unordered_*` `source` is `walk` although the values come from the printer), otherwise `null` with `internalError` (custom allocator, layout mismatch,
   more than the cap, ...). A `list`'s links are implicit in the entry order.
 - Enums are strings (`"RED"`), bools are booleans.
 
