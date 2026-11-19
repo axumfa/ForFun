@@ -6,7 +6,8 @@
   "scripts": {
     "typecheck": "tsc -p core && tsc -p extension && tsc -p webview",
     "build": "node scripts/build.mjs",
-    "test": "node --experimental-strip-types --test tests/*.test.ts"
+    "test": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/*.test.ts",
+    "trace": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/trace.ts"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
