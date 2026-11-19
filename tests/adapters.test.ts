@@ -8,7 +8,7 @@ import { findings } from "../core/analysis/findings.ts";
 const printed = (o: string) => o.trim().split(/\s+/);
 
 test("INVARIANT: every drawn heap edge exists in the observed pointer data (all examples, all steps)", async () => {
-  const files = ["linked-lists/list.cpp", "linked-lists/singly.cpp", "linked-lists/malloc_list.cpp", "linked-lists/doubly.cpp", "binary-trees/bst.cpp", "binary-trees/avl.cpp", "binary-trees/rbtree.cpp",
+  const files = ["linked-lists/list.cpp", "linked-lists/singly.cpp", "linked-lists/malloc_list.cpp", "linked-lists/doubly.cpp", "linked-lists/sentinel.cpp", "linked-lists/shared_ptr_list.cpp", "binary-trees/unique_ptr_tree.cpp", "graphs/dfs_ptr.cpp", "arrays/union_find.cpp", "binary-trees/bst.cpp", "binary-trees/avl.cpp", "binary-trees/rbtree.cpp",
     "hash-tables/chained.cpp", "tries/trie.cpp", "stacks-queues/stack_queue.cpp",
     "stl/map.cpp", "stl/set.cpp", "stl/list.cpp", "stl/deque.cpp", "stl/unordered_map.cpp", "stl/custom_alloc.cpp",
     "c/singly.c", "c/bst.c", "c/dynarray.c", "c/hash.c"];
@@ -191,4 +191,55 @@ test("stack and queue", async () => {
   assert.ok(q);
   assert.deepEqual(q.nodes.map((n) => n.label), ["7", "8", "9", "10"]);            // slot 0 still holds the dequeued 7: dequeue only moves head
   assert.deepEqual(q.markers.map((m) => m.name).sort(), ["head"]);
+});
+
+// ---- breadth examples: smart pointers, sentinel lists, pointer graphs, arrays-as-forests -----------------------------------------------
+const inorder = (sc: ReturnType<typeof scenesAt>["scenes"][number], id: string | null | undefined): string[] => {
+  if (!id) return [];
+  const lab = sc.nodes.find((n) => n.id === id)!.label, l = outEdges(sc, id, "left")[0]?.to, r = outEdges(sc, id, "right")[0]?.to;
+  return [...inorder(sc, l), lab, ...inorder(sc, r)];
+};
+
+test("unique_ptr tree: smart pointers are followed like raw pointers; in-order of the drawn tree equals the output", async () => {
+  const l = await load("binary-trees/unique_ptr_tree.cpp");
+  const i = stepAt(l, "std::printf(\"\\n\");");
+  const sc = scenesAt(l, i).scenes.find((s) => s.kind === "binary-tree")!;
+  assert.ok(sc, "drawn as a tree, not a generic graph");
+  assert.equal(sc.nodes.length, 6); assert.equal(sc.edges.length, 5);
+  assert.deepEqual(inorder(sc, ptrTarget(sc, "root")), printed(l.output));
+  assert.ok(!scenesAt(l, i).scenes.some((s) => s.kind === "generic"));
+});
+
+test("shared_ptr/weak_ptr list: next and prev links are drawn; chain equals the output", async () => {
+  const l = await load("linked-lists/shared_ptr_list.cpp");
+  const sc = scenesAt(l, stepAt(l, "for (auto n = head; n; n = n->next) std::printf")).scenes.find((s) => s.kind === "doubly-linked-list")!;
+  assert.ok(sc);
+  assert.deepEqual(chain(sc, ptrTarget(sc, "head")), printed(l.output));
+  assert.equal(sc.edges.filter((e) => e.kind === "prev").length, 3, "weak_ptr back links");
+});
+
+test("sentinel circular list: the circle is closed with observed links only (sentinel is a node, 2 links per node)", async () => {
+  const l = await load("linked-lists/sentinel.cpp");
+  const sc = scenesAt(l, stepAt(l, "for (Node* n = d.head->next;")).scenes.find((s) => s.kind === "doubly-linked-list")!;
+  assert.ok(sc); assert.equal(sc.nodes.length, 4); assert.equal(sc.edges.length, 8);
+  const head = ptrTarget(sc, "d.head")!;
+  assert.deepEqual(chain(sc, outEdges(sc, head, "next")[0]!.to).slice(0, 3), printed(l.output));   // sentinel excluded: 2 3 4
+});
+
+test("pointer graph: neighbour-vector edges equal the program's adjacency; no node is a dead end except where the program says", async () => {
+  const l = await load("graphs/dfs_ptr.cpp");
+  const sc = scenesAt(l, stepAt(l, "for (GNode* n : g) delete n;")).scenes.find((s) => s.kind === "graph")!;
+  assert.ok(sc); assert.equal(sc.nodes.length, 5); assert.equal(sc.edges.length, 6);   // 0->1,2  1->3  2->3,4  3->0
+  const lab = (id: string) => sc.nodes.find((n) => n.id === id)!.label;
+  const adj = sc.edges.map((e) => `${lab(e.from)}>${lab(e.to)}`).sort();
+  assert.deepEqual(adj, ["0>1", "0>2", "1>3", "2>3", "2>4", "3>0"]);
+});
+
+test("union-find arrays: following the drawn parent array reproduces the printed roots", async () => {
+  const l = await load("arrays/union_find.cpp");
+  const sc = scenesAt(l, stepAt(l, "for (int i = 0; i < 8; i++) std::printf")).scenes.find((s) => s.title.includes("d.parent"))!;
+  assert.ok(sc);
+  const parent = sc.nodes.map((n) => Number(n.label));
+  const root = (x: number) => { while (parent[x] !== x) x = parent[x]!; return x; };
+  assert.deepEqual(parent.map((_, i) => String(root(i))), printed(l.output));
 });

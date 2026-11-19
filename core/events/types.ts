@@ -55,9 +55,42 @@ export interface EndRecord {
 }
 export interface Trace { steps: Step[]; end: EndRecord | null; }
 
+const SMART = /^std::(unique_ptr|shared_ptr|weak_ptr)</;
+/** First raw pointer inside a smart-pointer struct: libstdc++ keeps it in `_M_ptr` (shared/weak) or `_M_head_impl` (unique), possibly nested. */
+function innerPtr(v: Value | undefined): PointerValue | undefined {
+  if (typeof v !== "object" || v === null) return undefined;
+  if ("ptr" in v) return v;
+  if ("fields" in v && v.kind === "struct") {
+    for (const k of ["_M_ptr", "_M_head_impl"]) { const p = innerPtr(v.fields[k]); if (p) return p; }
+    for (const f of Object.values(v.fields)) { const p = innerPtr(f); if (p) return p; }
+  }
+  return undefined;
+}
+/**
+ * Smart pointers (unique_ptr/shared_ptr/weak_ptr) are, for drawing purposes, just the raw pointer they hold: replace the struct by that
+ * PointerValue so every adapter follows them like `T*`. Done in core (not the tracer) so the trace stays a pure observation.
+ */
+export function normalizeSmartPointers(v: Value | undefined): Value | undefined {
+  if (typeof v !== "object" || v === null) return v;
+  if ("fields" in v && v.kind === "struct") {
+    if (SMART.test(v.type)) { const p = innerPtr(v); if (p) return p; }
+    for (const [k, f] of Object.entries(v.fields)) v.fields[k] = normalizeSmartPointers(f) as Value;
+  } else if ("elems" in v) v.elems = v.elems.map((e) => normalizeSmartPointers(e) as Value);
+  else if ("entries" in v && v.kind === "stl") for (const e of v.entries) { e.value = normalizeSmartPointers(e.value) as Value; if (e.key !== undefined) e.key = normalizeSmartPointers(e.key) as Value; }
+  return v;
+}
+function normalizeStep(st: Step): void {
+  for (const f of st.frames) for (const [k, v] of Object.entries(f.locals)) f.locals[k] = normalizeSmartPointers(v) as Value;
+  for (const e of st.events) {
+    if (e.type === "object_created") { if (e.fields) for (const [k, v] of Object.entries(e.fields)) e.fields[k] = normalizeSmartPointers(v) as Value; if (e.elems) e.elems = e.elems.map((x) => normalizeSmartPointers(x) as Value); }
+    else if (e.type !== "object_freed") { e.old = normalizeSmartPointers(e.old); e.new = normalizeSmartPointers(e.new) as Value; }
+  }
+}
+
 /** Parse JSONL produced by the engine. Throws on schema mismatch or malformed records (never guesses). */
 export function parseTrace(jsonl: string): Trace {
   const trace: Trace = { steps: [], end: null };
+  const hasSmart = /"std::(unique|shared|weak)_ptr</.test(jsonl);   // cheap pre-check: most traces have none
   const lines = jsonl.split("\n").filter((l) => l.trim().length > 0);
   lines.forEach((l, i) => {
     let rec: unknown;
@@ -67,7 +100,7 @@ export function parseTrace(jsonl: string): Trace {
     }
     const r = rec as { kind?: string; schema?: number };
     if (r.schema !== SCHEMA_VERSION) throw new Error(`trace line ${i + 1}: unsupported schema ${String(r.schema)}`);
-    if (r.kind === "step") trace.steps.push(rec as Step);
+    if (r.kind === "step") { if (hasSmart) normalizeStep(rec as Step); trace.steps.push(rec as Step); }
     else if (r.kind === "end") trace.end = rec as EndRecord;
     else throw new Error(`trace line ${i + 1}: unknown record kind ${String(r.kind)}`);
   });
