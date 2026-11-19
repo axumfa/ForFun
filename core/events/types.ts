@@ -130,7 +130,7 @@ function normalizeStep(st: Step): void {
 export function parseTrace(jsonl: string): Trace {
   const trace: Trace = { steps: [], end: null };
   let prevFrames: Frame[] = [];
-  const hasSmart = /"std::(unique|shared|weak)_ptr</.test(jsonl);   // cheap pre-check: most traces have none
+  const hasSmart = /std::(unique|shared|weak)_ptr</.test(jsonl);   // cheap pre-check: most traces have none
   const lines = jsonl.split("\n").filter((l) => l.trim().length > 0);
   lines.forEach((l, i) => {
     let rec: unknown;

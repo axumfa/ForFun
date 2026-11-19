@@ -169,3 +169,10 @@ test("bwrapArgs: work dir is the only writable bind; allowRead dirs are read-onl
   assert.deepEqual(binds, ["/tmp/dsv-x"]);
   assert.ok(a.some((x, i) => x === "--ro-bind" && a[i + 1] === "/") && a.some((x, i) => x === "--ro-bind" && a[i + 1] === root));
 });
+
+test("sandbox: the source file stays readable even when it sits directly in the (privatised) /tmp", { skip: !sandboxAvailable && "bwrap not usable here" }, async () => {
+  const f = src("selfread.cpp", `#include <cstdio>\nint main() { FILE* f = std::fopen(__FILE__, "r"); std::printf("%d\\n", f != nullptr); return 0; }\n`);
+  assert.equal(path.dirname(f).startsWith(os.tmpdir()), true);
+  const r = await runTrace(f, { ...cfg, sandbox: "auto" });
+  assert.equal(r.sandbox, "bwrap"); assert.equal(r.programOutput.trim(), "1");
+});

@@ -117,7 +117,7 @@ export async function runTrace(sourceFile: string, cfg: RunnerConfig, workRoot =
       DSV_SHIM: shim, DSV_PROG_OUT: progOut, DSV_MAX_STEPS: String(cfg.maxSteps) };
     if (driverPath) env.DSV_DRIVER = driverPath;
     const boxed = cfg.sandbox === "auto" && BWRAP_OK;
-    const wrap = boxed ? bwrapArgs(work, [cfg.engineDir, path.dirname(sourceFile)]) : undefined;
+    const wrap = boxed ? bwrapArgs(work, [cfg.engineDir, path.dirname(sourceFile), sourceFile]) : undefined;
     const r = await exec(cfg.gdb, ["-q", "-batch", "-x", path.join(cfg.engineDir, "debugger", "gdb_tracer.py"), "--args", prog],
       { ...lim, env, timeoutMs: cfg.runTimeoutMs, cpuSeconds: Math.ceil(cfg.runTimeoutMs / 1000) + 5, isolateNetwork: cfg.isolateNetwork, wrap });
     const raw = fs.existsSync(traceOut) ? fs.readFileSync(traceOut, "utf8") : "";
