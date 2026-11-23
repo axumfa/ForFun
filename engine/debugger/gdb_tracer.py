@@ -784,6 +784,13 @@ def main():
     gdb.execute("set exec-wrapper env LD_PRELOAD=%s DSV_ALLOC_LOG=%s" % (E["DSV_SHIM"], LOG))
     gdb.execute("break main")
     gdb.execute("run > %s < /dev/null" % E["DSV_PROG_OUT"], to_string=True)
+    # C++ exceptions: gdb follows `step` through a throw only when it finds `_Unwind_DebugHook` in libgcc_s, which Ubuntu's stripped libgcc_s lacks (the
+    # program then runs to its end from the throw, and the trace stops there). A breakpoint where a handler is entered makes the stop explicit: the main
+    # loop's non-user branch `finish`es out of libstdc++ until it is back in traced user code (the handler: the trace continues there) or keeps
+    # finishing silently when the handler is in code that is not traced (caught inside a call that is stepped over: no extra stops).
+    if E.get("DSV_NO_CATCH_BP") != "1":                  # DSV_NO_CATCH_BP: test hook, behave as before
+        try: gdb.Breakpoint("__cxa_begin_catch", internal=True)
+        except gdb.error: pass                           # C program / static libstdc++: nothing to catch
     prev = {"frames": [], "objects": {}}; n = 0; hit = None; subk = 0
     while True:
         if n >= MAX_STEPS: return end("step_limit", None, "stopped after %d steps" % n)

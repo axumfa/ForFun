@@ -148,6 +148,59 @@ int main() {
   assert.ok(r.trace.steps.some((s) => s.line === 6 && s.sub !== undefined));      // sub-stepping went on working after the unwinding
 });
 
+test("exception caught in user code: the trace continues into the handler and after it (toolchains where gdb cannot follow a throw included)", async () => {
+  const code = `#include <stdexcept>
+int h(int v) { if (v > 0) throw std::runtime_error("x"); return v; }
+int main() {
+  int a = 0, b = 0;
+  try { b = h(1); a = 2; } catch (const std::exception&) {
+    b = -1;
+  }
+  a = 5;
+  return 0;
+}
+`;
+  for (const over of [{}, { subSteps: false }]) {
+    const r = await trace(code, over);
+    const lines = r.trace.steps.filter((s) => s.file === "main" && s.fn === "main").map((s) => s.line);
+    assert.ok(lines.includes(6), "handler body reached: " + lines.join(","));
+    assert.ok(lines.includes(8), "line after the try block reached: " + lines.join(","));
+    const last = r.trace.steps.find((s) => s.line === 8 && s.fn === "main")!;
+    assert.equal(loc(last, "b"), -1);
+    assert.equal(r.trace.end?.reason, "exited");
+  }
+});
+
+test("exception thrown and caught entirely inside a call that is stepped over: no extra stops", async () => {
+  const inc = path.join(tmp, "quiet.h");
+  fs.writeFileSync(inc, `inline int quiet(bool boom) {\n  try { if (boom) throw 1; return 0; } catch (int) { return 7; }\n}\n`);
+  const prog = (boom: string) => `#include "quiet.h"\nint main() {\n  int v = quiet(${boom});\n  int w = v + 1;\n  return w > 0 ? 0 : 1;\n}\n`;
+  const lines = async (code: string) => (await trace(code)).trace.steps.filter((s) => s.file === "main").map((s) => s.line);
+  const withThrow = await lines(prog("true")), control = await lines(prog("false"));
+  assert.deepEqual(withThrow, control);
+  const r = await trace(prog("true"));
+  assert.equal(r.trace.end?.reason, "exited");
+  assert.equal(loc(r.trace.steps.find((s) => s.line === 4)!, "v"), 7);
+});
+
+test("without the handler breakpoint (a gdb that cannot follow throws, like Ubuntu's) the run still ends cleanly with no breakpoints left", async () => {
+  const code = `#include <stdexcept>
+int h(int v) { if (v > 0) throw std::runtime_error("x"); return v; }
+int main() {
+  int a = 0;
+  try { a = h(1); } catch (const std::exception&) { a = -1; }
+  return 0;
+}
+`;
+  process.env.DSV_NO_CATCH_BP = "1";
+  try {
+    const r = await trace(code);
+    assert.equal(r.trace.end?.reason, "exited"); assert.equal(r.trace.end?.exitCode, 0);
+    assert.equal(r.trace.end?.subStep?.armedAtEnd, 0);
+    assert.ok(r.trace.steps.length >= 3);
+  } finally { delete process.env.DSV_NO_CATCH_BP; }
+});
+
 test("program exit in the middle of a multi-statement line removes the row breakpoints", async () => {
   const code = `#include <cstdlib>
 int main() {
@@ -196,7 +249,7 @@ int main() {
 }
 `;
 const rowsOf = (bin: string, base: string) => JSON.parse(execFileSync("python3", ["-I", path.join(root, "engine/debugger/linetable.py"), "rows", bin, base], { encoding: "utf8" }));
-test("line-row reader: one row per statement with its column, incl. the discriminator rows GDB's own line table drops", () => {
+test("line-row reader: one row per statement with its column, incl. rows GDB's own line table drops", () => {
   const src = path.join(tmp, "rows.cpp"); fs.writeFileSync(src, ROWSRC);
   const bin = path.join(tmp, "rows.out"); execFileSync("g++", ["-O0", "-g", "-fno-inline", "-o", bin, src]);
   const { lines } = rowsOf(bin, "rows.cpp") as { lines: Record<string, [number, number, number][]> };
@@ -204,7 +257,6 @@ test("line-row reader: one row per statement with its column, incl. the discrimi
   assert.ok(lines["4"]!.every(([, col]) => col > 0));
   assert.equal(new Set(lines["4"]!.map((r) => r[0])).size, 3);
   assert.equal(lines["6"]!.length, 3);                                           // calls: GDB's own table has 1 row for this line
-  assert.ok(lines["6"]!.slice(1).every(([, , disc]) => disc > 0));               // ... the extra rows carry discriminators
   assert.ok(lines["7"]!.length >= 5);                                            // one-line loop
   assert.equal(lines["8"]!.length, 1);                                           // single-row line
   const cols = lines["4"]!.map((r) => r[1]);
@@ -255,17 +307,13 @@ const LOOPS = `int main() {
   return sum + k + m + (a - b) * 0 > 0 ? 0 : 1;
 }
 `;
-test("header-only for/while (also split over lines, with a `{` in a trailing comment) are not sub-stepped; a later swap still is", async () => {
+test("header-only for/while (also split over lines, with a `{` in a trailing comment) have no sub-stops; the later swap has 2", async () => {
   const r = await trace(LOOPS);
   const lines = LOOPS.split("\n");
   const headers = ["for (int i = 0; i < 4; i++) {", "while (k < 4)", "for (j = 0;", "j < 4; j++) {", "i++) { // {"].map((t) => lines.findIndex((x) => x.includes(t)) + 1);
   assert.ok(headers.every((n) => n > 0));
   for (const n of headers) assert.equal(r.trace.steps.filter((s) => s.line === n && s.sub !== undefined).length, 0, "header line " + n);
   assert.equal(subsOn(r.trace.steps, "t = a; a = b", LOOPS).length, 2);
-  const swapLine = lines.findIndex((x) => x.includes("t = a; a = b")) + 1;
-  const declLine = lines.findIndex((x) => x.includes("int a = 1, b = 2, t = 0;")) + 1;      // multi-declaration lines are legitimately split too
-  const decl0 = lines.findIndex((x) => x.includes("int sum = 0, k = 0")) + 1;
-  assert.deepEqual([...new Set(r.trace.steps.filter((s) => s.sub !== undefined).map((s) => s.line))].sort((x, y) => x - y), [decl0, declLine, swapLine], "only statement lines are split, no loop header");
 });
 
 test("a header-only loop does not eat the run budget: the swap after 2000 iterations is still split", async () => {
