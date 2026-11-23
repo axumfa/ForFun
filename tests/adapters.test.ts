@@ -279,7 +279,14 @@ test("pointer cells carry a ref to the pointee: vector<Node*> cells and map valu
   const at = scenesAt(m, stepAt(m, "for (const auto& kv : index)")).scenes;
   const sm = at.find((x) => x.kind === "map")!, nodes = at.filter((x) => x.kind !== "map").flatMap((x) => x.nodes);
   assert.ok(sm, "the map is drawn"); const refs = sm.nodes.filter((n) => n.ref);
-  assert.equal(refs.length, 3, "all three values are object pointers");
+  // On a failure, say what the map actually looked like (this test is flaky on one CI toolchain; the message is the data needed to find out why).
+  const mapDump = () => {
+    const st = m.history.stateAt(stepAt(m, "for (const auto& kv : index)")), idx = st.frames[0]!.locals.index as { entries?: unknown[]; source?: string; internalError?: string; size?: number; text?: string; unavailable?: string } | undefined;
+    return JSON.stringify({ stl: idx && { source: idx.source, size: idx.size, internalError: idx.internalError, unavailable: idx.unavailable, entries: idx.entries?.slice(0, 5) },
+      sceneNodes: sm.nodes.map((n) => ({ id: n.id, label: n.label, sub: n.sub, ref: n.ref })), scenes: at.map((x) => `${x.kind}:${x.nodes.length}`),
+      liveObjects: Object.entries(st.objects).map(([a, o]) => `${a}:${o.type}:${o.state}`) });
+  };
+  assert.equal(refs.length, 3, "all three values are object pointers; map dump: " + mapDump());
   for (const n of refs) assert.ok(nodes.some((x) => x.id === n.ref), "the pointee Node is drawn by its own adapter, under the id the ref names");
 });
 
