@@ -22,7 +22,7 @@ Run from the repo root unless noted. All verified on this machine (Node 22, GDB,
 - Interactive: open `extension/` in VS Code, F5 (Extension Development Host), right-click a `.cpp` -> "Visualize Code".
 
 ## Architecture map
-- `engine/debugger/gdb_tracer.py`: GDB-side script. Single-steps the debuggee, reads memory, writes trace JSONL (schema v5). Observations only, no inference. `engine/debugger/linetable.py`: strict parser of `objdump --dwarf=decodedline` for sub-line stepping (no gdb import, fixture-tested).
+- `engine/debugger/gdb_tracer.py`: GDB-side script. Single-steps the debuggee, reads memory, writes trace JSONL (schema v5). Observations only, no inference. `engine/debugger/linetable.py`: DWARF line rows (columns, discriminators) via the vendored `engine/vendor/pyelftools` (unmodified, Python >= 3.10) for sub-line stepping (no gdb import).
 - `engine/runtime/shim.cpp`: `LD_PRELOAD` shim logging `operator new/delete` to an alloc log the tracer reads.
 - `core/`: pure TypeScript, no VS Code/Node-runtime coupling, shared by extension and webview.
   - `events/types.ts`: trace schema, `parseTrace`, `SCHEMA_VERSION` (see `docs/events.md`)

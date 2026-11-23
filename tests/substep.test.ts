@@ -8,6 +8,7 @@ import { runTrace, type RunnerConfig } from "../extension/src/execution/runner.t
 import { parseTrace } from "../core/events/types.ts";
 import type { Step, Value } from "../core/events/types.ts";
 import { cfg, root } from "./helpers.ts";
+import { statementRange } from "../core/explain/columns.ts";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "dsv-sub-"));
 test.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
@@ -160,15 +161,16 @@ int main() {
   assert.equal(r.trace.end?.subStep?.armedAtEnd, 0);
 });
 
-test("a line whose rows cannot be read (objdump missing) is read whole, with the reason, and the run does not fail", async () => {
-  process.env.DSV_OBJDUMP = "/nonexistent/objdump";
+test("rows that cannot be read (not an ELF file) -> lines are read whole, the reason is in the end record, the run does not fail", async () => {
+  const bad = path.join(tmp, "not-an-elf"); fs.writeFileSync(bad, "plain text");
+  process.env.DSV_LINETABLE_FILE = bad;
   try {
     const r = await trace(SWAP);
     assert.equal(r.trace.end?.reason, "exited");
     assert.ok(r.trace.steps.every((s) => s.sub === undefined));
     assert.equal(r.trace.end?.subStep?.enabled, false);
-    assert.match(r.trace.end?.subStep?.note ?? "", /objdump/);
-  } finally { delete process.env.DSV_OBJDUMP; }
+    assert.match(r.trace.end?.subStep?.note ?? "", /cannot read DWARF line table/);
+  } finally { delete process.env.DSV_LINETABLE_FILE; }
 });
 
 test("schema: v4 traces (no `sub`, no `subStep`) load without migration; v5 fields are optional; other versions are rejected", () => {
@@ -182,26 +184,41 @@ test("schema: v4 traces (no `sub`, no `subStep`) load without migration; v5 fiel
   assert.throws(() => parseTrace(v4.replace(/"schema":4/g, '"schema":6')), /unsupported schema/);
 });
 
-// --- the DWARF line-row parser (engine/debugger/linetable.py), on fixtures from real objdump output ---
-const lt = (file: string, ...args: string[]) => JSON.parse(execFileSync("python3", ["-I", path.join(root, "engine/debugger/linetable.py"), path.join(root, "tests/fixtures", file), ...args], { encoding: "utf8" }));
-test("line-row parser: current binutils layout (rows the GDB line table drops are present)", () => {
-  assert.deepEqual(lt("objdump-2.47.txt", "m9.cpp", "5", "0x401162").after, [0x401168, 0x40116e]);            // the swap
-  assert.deepEqual(lt("objdump-2.47.txt", "m9.cpp", "7", "0x40118d").after, [0x40119a, 0x4011a7]);            // calls: GDB's table has one row for this line
-  assert.equal(lt("objdump-2.47.txt", "m9.cpp", "8", "0x4011b2").after.length, 5);                            // one-line loop
-  assert.deepEqual(lt("objdump-2.47.txt", "m9.cpp", "9", "0x4011d1").after, []);                              // a single-row line is left alone
-  assert.deepEqual(lt("objdump-2.47.txt", "m9.cpp", "5", "0x401168").after, [0x40116e]);                      // from the middle of a line
-  assert.deepEqual(lt("objdump-2.47.txt", "m9.cpp", "6", "0x401162").after, []);                              // the row at addr belongs to another line
+// --- the DWARF line-row reader (engine/debugger/linetable.py, vendored pyelftools) on a binary compiled here ---
+const ROWSRC = `int g(int x) { return x + 1; }
+int main() {
+  int a = 1, b = 2, tmp = 0;
+  tmp = a; a = b; b = tmp;
+  int c = (a = 5, b = 6, a + b);
+  a = g(a); b = g(b); tmp = a + b;
+  for (int i = 0; i < 3; i++) { a += i; b += a; }
+  return c + tmp;
+}
+`;
+const rowsOf = (bin: string, base: string) => JSON.parse(execFileSync("python3", ["-I", path.join(root, "engine/debugger/linetable.py"), "rows", bin, base], { encoding: "utf8" }));
+test("line-row reader: one row per statement with its column, incl. the discriminator rows GDB's own line table drops", () => {
+  const src = path.join(tmp, "rows.cpp"); fs.writeFileSync(src, ROWSRC);
+  const bin = path.join(tmp, "rows.out"); execFileSync("g++", ["-O0", "-g", "-fno-inline", "-o", bin, src]);
+  const { lines } = rowsOf(bin, "rows.cpp") as { lines: Record<string, [number, number, number][]> };
+  assert.equal(lines["4"]!.length, 3);                                           // the swap: 3 statements
+  assert.ok(lines["4"]!.every(([, col]) => col > 0));
+  assert.equal(new Set(lines["4"]!.map((r) => r[0])).size, 3);
+  assert.equal(lines["6"]!.length, 3);                                           // calls: GDB's own table has 1 row for this line
+  assert.ok(lines["6"]!.slice(1).every(([, , disc]) => disc > 0));               // ... the extra rows carry discriminators
+  assert.ok(lines["7"]!.length >= 5);                                            // one-line loop
+  assert.equal(lines["8"]!.length, 1);                                           // single-row line
+  const cols = lines["4"]!.map((r) => r[1]);
+  assert.deepEqual(cols, [...cols].sort((x, y) => x - y));                       // columns rise along the line
 });
-test("line-row parser: older layout without View/Stmt columns", () => {
-  assert.deepEqual(lt("objdump-old.txt", "a.c", "4", "0x1131").after, [0x1138]);
-});
-test("line-row parser is strict: an unrecognised line is an error, never a partial table", () => {
-  assert.match(lt("objdump-bad.txt").error, /not understood/);
+test("line-row reader: a file that is not an ELF binary is an error, never a partial table", () => {
+  const f = path.join(tmp, "junk"); fs.writeFileSync(f, "not elf");
+  assert.match(rowsOf(f, "x").error, /cannot read DWARF line table/);
+  assert.match(rowsOf(path.join(tmp, "rows.cpp"), "x").error, /cannot read DWARF line table/);
 });
 
 // --- loop headers whose body is on other lines are not sub-stepped (their stops only repeat the body's first state) ---
 const subsOn = (steps: Step[], text: string, code: string) => onLine(steps, text, code).filter((s) => s.sub !== undefined);
-const hdr = (src: string) => lt("objdump-2.47.txt", "m9.cpp", "5", "0x401162") && JSON.parse(execFileSync("python3", ["-I", path.join(root, "engine/debugger/linetable.py"), "header", src], { encoding: "utf8" })).header as boolean;
+const hdr = (src: string) => JSON.parse(execFileSync("python3", ["-I", path.join(root, "engine/debugger/linetable.py"), "header", src], { encoding: "utf8" })).header as boolean;
 
 test("loop-header rule on source text: comments are ignored, one-line loops are not headers", () => {
   assert.equal(hdr("  for (int i = 0; i < n; i++) {"), true);
@@ -265,4 +282,33 @@ test("a header-only loop does not eat the run budget: the swap after 2000 iterat
   const r = await trace(code, { maxSubStepsPerRun: 50 });
   assert.equal(r.trace.end?.subStep?.budgetExceeded, false);
   assert.equal(subsOn(r.trace.steps, "t = a; a = b", code).length, 2);
+});
+
+test("adaptive disarm: a line whose stops were all dropped as unchanged for 8 executions in a row is not armed again; the budget then still reaches a later swap", async () => {
+  const code = `int main() {
+  long s = 0;
+  for (int i = 0; i < 40; i++) {
+    s += i;
+  }
+  int a = 1, b = 2, t = 0;
+  t = a; a = b; b = t;
+  return s > 0 ? 0 : 1;
+}
+`;
+  const r = await trace(code, { maxSubStepsPerRun: 14 });
+  const ss = r.trace.end!.subStep!;
+  assert.deepEqual(ss.disarmedLines, [["main", 4]]);
+  assert.deepEqual(ss.droppedByLine![0], [4, 8]);                                  // exactly the 8 executions it took to learn, not 40: never armed again
+  assert.equal(ss.budgetExceeded, false);
+  assert.equal(subsOn(r.trace.steps, "t = a; a = b", code).length, 2);              // 14 - 8 left for the later swap (+ the declaration line)
+});
+
+test("columns: every stop of a split line carries the column of the statement about to run; single-row lines carry none", async () => {
+  const r = await trace(SWAP);
+  const text = SWAP.split("\n")[2]!;
+  const st = onLine(r.trace.steps, "tmp = a; a = b", SWAP);
+  const shown = st.map((s) => { const g = statementRange(text, s.col); return g && text.slice(g[0], g[1]); });
+  assert.deepEqual(shown, ["tmp = a;", "a = b;", "b = tmp;"]);
+  const ret = r.trace.steps.find((s) => s.line === 5 && s.file === "main")!;            // the closing `}` has a single row
+  assert.equal(ret.col, undefined);
 });

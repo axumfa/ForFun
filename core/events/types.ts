@@ -80,6 +80,8 @@ export interface Step {
   /** v5, optional: 1, 2, ... marks an intermediate stop *inside* `line` (state after the line's k-th statement); absent for the normal stop at a line's start. */
   sub?: number;
   /** v5, optional: sub-stepping stopped before this record because a budget ran out (`line`: per-line limit on `line`; `run`: per-run limit); what changed since the previous record is the rest of that line (or later lines) shown whole. */
+  /** v5, optional: 1-based byte column of the statement about to run on a line that is split into several stops (sub stops and the first stop of such a line); absent/0 = unknown, highlight the whole line. */
+  col?: number;
   subCut?: { why: "line" | "run"; limit: number; line?: number };
   frames: Frame[];            // innermost first, user-code frames only
   events: TraceEvent[];
@@ -90,7 +92,7 @@ export interface EndRecord {
   kind: "end"; schema: number; reason: EndReason; exitCode: number | null;
   message?: string; signal?: string; line?: number; doubleFrees?: string[];
   /** v5, optional: how sub-line stepping went (`note` = why it was off / not verified; `truncated` = lines that exceeded the per-line budget and were read whole). */
-  subStep?: { enabled: boolean; arch: string | null; subSteps: number; dropped: number; truncatedLines: number; budgetExceeded: boolean; armedAtEnd: number; truncated?: [string, number][]; droppedByLine?: [number, number][]; note?: string };
+  subStep?: { enabled: boolean; arch: string | null; subSteps: number; dropped: number; truncatedLines: number; budgetExceeded: boolean; armedAtEnd: number; truncated?: [string, number][]; droppedByLine?: [number, number][]; disarmedLines?: [string, number][]; note?: string };
 }
 export interface Trace { steps: Step[]; end: EndRecord | null; }
 

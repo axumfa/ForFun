@@ -1,27 +1,42 @@
-"""DWARF line rows for sub-line stepping (M9), parsed from `objdump --dwarf=decodedline`.
-GDB's own line table drops the rows that carry a discriminator (the 2nd+ statement with a call, loop parts), so the raw rows are read here.
-Pure Python, no gdb import: unit-tested on fixtures (tests/linetable.test.ts). The parser is strict: any line it does not recognise raises
-ParseError and the tracer falls back to per-line reads (never a partial table). pyelftools was rejected: not installed with gdb's Python and a new dependency."""
+"""DWARF line rows for sub-line stepping (M9), read with the vendored pyelftools (engine/vendor/pyelftools, Python >= 3.10).
+GDB's own line table drops the rows that carry a discriminator (the 2nd+ statement with a call, loop parts) and has no columns; the raw rows have both.
+Pure Python, no gdb import: unit-tested on binaries compiled by the tests (tests/substep.test.ts). Any failure (pyelftools not importable, no DWARF line
+program, unreadable file) raises and the tracer falls back to per-line reads with the reason in the end record."""
 import bisect, json, os, re, sys
 
 class ParseError(Exception): pass
 
-ROW = re.compile(r"^(?P<f>\S+)\s+(?P<l>\d+|-)\s+(?P<a>0x[0-9a-fA-F]+)(?:\s+(?P<v>\d+|x))?(?:\s+(?P<s>x))?\s*$")
-IGNORED = (re.compile(r"^\S.*: +file format \S+$"), re.compile(r"^Contents of the \.debug_line section:$"), re.compile(r"^File name\s+Line number\s+Starting address"),
-           re.compile(r"^CU: .*:$"), re.compile(r"^\S[^\s]*:$"))
+def _elftools():
+    here = os.path.dirname(os.path.abspath(__file__))
+    v = os.path.join(here, "..", "vendor", "pyelftools")
+    if v not in sys.path: sys.path.insert(0, v)
+    try:
+        from elftools.elf.elffile import ELFFile
+        return ELFFile
+    except Exception as e: raise ParseError("pyelftools not importable (needs Python >= 3.10): %s" % (e,))
 
-def parse(text):
-    """-> list of (addr, file_basename, line|None, is_stmt) in objdump order; line None = end of sequence. `is_stmt` is True when the column is absent (old binutils)."""
-    rows, has_stmt_col = [], "Stmt" in text
-    for n, raw in enumerate(text.splitlines(), 1):
-        s = raw.strip()
-        if not s or any(p.match(s) for p in IGNORED): continue
-        m = ROW.match(s)
-        if not m: raise ParseError("line %d not understood: %r" % (n, raw[:80]))
-        v, st = m.group("v"), m.group("s")
-        if v == "x": v, st = None, "x"                          # `x` in the view column: the old layout without views
-        rows.append((int(m.group("a"), 16), os.path.basename(m.group("f")), None if m.group("l") == "-" else int(m.group("l")), (st == "x") if has_stmt_col else True))
-    if not rows: raise ParseError("no line rows")
+def read_rows(path):
+    """-> list of (addr, file_basename, line|None, is_stmt, column, discriminator) in line-program order; line None = end of sequence.
+    Addresses are as in the ELF file (not relocated). Raises ParseError when the file cannot be read as an ELF with DWARF line information."""
+    ELFFile = _elftools()
+    rows = []
+    try:
+        with open(path, "rb") as f:
+            dw = ELFFile(f).get_dwarf_info()
+            for cu in dw.iter_CUs():
+                lp = dw.line_program_for_CU(cu)
+                if lp is None: continue
+                files, ver = lp["file_entry"], lp["version"]
+                for e in lp.get_entries():
+                    st = e.state
+                    if st is None: continue
+                    i = st.file if ver >= 5 else st.file - 1
+                    if not 0 <= i < len(files): raise ParseError("row refers to file index %d of %d" % (st.file, len(files)))
+                    name = os.path.basename(files[i].name.decode("utf8", "replace"))
+                    rows.append((st.address, name, None if st.end_sequence else st.line, bool(st.is_stmt) or st.end_sequence, st.column, st.discriminator))
+    except ParseError: raise
+    except Exception as e: raise ParseError("cannot read DWARF line table of %s: %s: %s" % (os.path.basename(path), type(e).__name__, e))
+    if not rows: raise ParseError("no DWARF line rows (compiled without -g?)")
     return rows
 
 def strip_comments(line):
@@ -70,6 +85,10 @@ class Table:
     def __init__(self, rows):
         r = sorted((x for x in rows if x[3] or x[2] is None), key=lambda x: x[0])      # statement rows + end markers, by address (stable)
         self.rows, self.addrs = r, [x[0] for x in r]
+    def col(self, addr, fname, line):
+        """Column (1-based) of the statement row containing `addr` for (file, line); 0 when none or the compiler gave no column."""
+        i = bisect.bisect_right(self.addrs, addr) - 1
+        return self.rows[i][4] if i >= 0 and self.rows[i][1] == fname and self.rows[i][2] == line else 0
     def after(self, addr, fname, line):
         """Addresses of the rows following the row that contains `addr`, while they stay on the same (file, line): the statements of one source line.
         Empty when the row containing addr is not that line or the line has no further row."""
@@ -94,9 +113,10 @@ def find_bias(gdb_rows, table, fname):
 
 if __name__ == "__main__" and sys.argv[1:2] == ["header"]:     # test hook: linetable.py header 'source line' -> JSON
     print(json.dumps({"header": is_loop_header(sys.argv[2])})); sys.exit(0)
-if __name__ == "__main__":      # test hook: linetable.py FILE BASENAME LINE ADDR -> JSON of table.after(); or `check FILE` to exercise the strict parser
-    t = sys.argv[1]
-    try: rows = parse(open(t).read())
+if __name__ == "__main__" and sys.argv[1:2] == ["rows"]:      # test hook: `linetable.py rows BINARY BASENAME` -> {"lines": {line: [[addr, column, discriminator], ...]}} or {"error"}
+    try: rows = read_rows(sys.argv[2])
     except ParseError as e: print(json.dumps({"error": str(e)})); sys.exit(0)
-    if len(sys.argv) == 2: print(json.dumps({"rows": len(rows)})); sys.exit(0)
-    print(json.dumps({"after": Table(rows).after(int(sys.argv[4], 0), sys.argv[2], int(sys.argv[3]))}))
+    out = {}
+    for a, f, l, st, c, d in rows:
+        if f == sys.argv[3] and l is not None and st: out.setdefault(str(l), []).append([a, c, d])
+    print(json.dumps({"lines": out}))
