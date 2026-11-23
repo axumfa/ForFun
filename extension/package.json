@@ -90,6 +90,21 @@
           "type": "number",
           "default": 20000
         },
+        "dsv.subSteps": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show intermediate states inside a source line that holds several statements (a one-line swap). Off = one step per line."
+        },
+        "dsv.maxSubStepsPerLine": {
+          "type": "number",
+          "default": 64,
+          "description": "Most intermediate stops per execution of one line; a line over this is read whole (like before)."
+        },
+        "dsv.maxSubStepsPerRun": {
+          "type": "number",
+          "default": 5000,
+          "description": "Most intermediate stops in one run; afterwards lines are read whole."
+        },
         "dsv.maxMemoryMB": {
           "type": "number",
           "default": 4096,

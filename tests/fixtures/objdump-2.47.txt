@@ -1,0 +1,35 @@
+
+m9:     file format elf64-x86-64
+
+Contents of the .debug_line section:
+
+m9.cpp:
+File name                        Line number    Starting address    View    Stmt
+m9.cpp                                     2            0x401136               x
+m9.cpp                                     2            0x40113d               x
+m9.cpp                                     2            0x401143               x
+m9.cpp                                     3            0x401145               x
+m9.cpp                                     4            0x40114d               x
+m9.cpp                                     4            0x401154               x
+m9.cpp                                     4            0x40115b               x
+m9.cpp                                     5            0x401162               x
+m9.cpp                                     5            0x401168               x
+m9.cpp                                     5            0x40116e               x
+m9.cpp                                     6            0x401174               x
+m9.cpp                                     6            0x40117b               x
+m9.cpp                                     6            0x401182               x
+m9.cpp                                     7            0x40118d               x
+m9.cpp                                     7            0x40119a               x
+m9.cpp                                     7            0x4011a7               x
+m9.cpp                                     8            0x4011b2               x
+m9.cpp                                     8            0x4011b9               x
+m9.cpp                                     8            0x4011bb               x
+m9.cpp                                     8            0x4011c1               x
+m9.cpp                                     8            0x4011c7               x
+m9.cpp                                     8            0x4011cb               x
+m9.cpp                                     9            0x4011d1               x
+m9.cpp                                    10            0x4011f1               x
+m9.cpp                                    11            0x4011f6               x
+m9.cpp                                     -            0x4011f8
+
+

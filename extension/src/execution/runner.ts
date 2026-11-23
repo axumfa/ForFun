@@ -16,6 +16,8 @@ export interface RunnerConfig {
   compileTimeoutMs: number;
   runTimeoutMs: number;
   maxSteps: number;
+  /** M9 sub-line stepping: false = per-line reads only; the budgets cap sub-stops per execution of a line / per run (a line over budget is read whole). Defaults 64 / 5000. */
+  subSteps?: boolean; maxSubStepsPerLine?: number; maxSubStepsPerRun?: number;
   maxOutputBytes: number;
   maxMemoryMB: number;      // virtual-memory cap for the whole tracing process tree (0 = unlimited)
   isolateNetwork: boolean;  // run inside a new network namespace when the OS allows it
@@ -114,7 +116,9 @@ export async function runTrace(sourceFile: string, cfg: RunnerConfig, workRoot =
 
     const traceOut = path.join(work, "trace.jsonl"), progOut = path.join(work, "program_out.txt");
     const env: NodeJS.ProcessEnv = { ...process.env, DSV_SRC: sourceFile, DSV_OUT: traceOut, DSV_ALLOC_LOG: path.join(work, "alloc.log"),
-      DSV_SHIM: shim, DSV_PROG_OUT: progOut, DSV_MAX_STEPS: String(cfg.maxSteps) };
+      DSV_SHIM: shim, DSV_PROG_OUT: progOut, DSV_MAX_STEPS: String(cfg.maxSteps),
+      DSV_TRACER_DIR: path.join(cfg.engineDir, "debugger"), DSV_SUBSTEP: cfg.subSteps === false ? "0" : "1",
+      DSV_SUBSTEP_LINE: String(cfg.maxSubStepsPerLine ?? 64), DSV_SUBSTEP_RUN: String(cfg.maxSubStepsPerRun ?? 5000) };
     if (driverPath) env.DSV_DRIVER = driverPath;
     const boxed = cfg.sandbox === "auto" && BWRAP_OK;
     const wrap = boxed ? bwrapArgs(work, [cfg.engineDir, path.dirname(sourceFile), sourceFile]) : undefined;

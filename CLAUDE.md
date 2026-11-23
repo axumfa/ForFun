@@ -11,7 +11,7 @@ Run from the repo root unless noted. All verified on this machine (Node 22, GDB,
 - Install: `npm ci` (npm workspaces: `extension`, `webview`)
 - Build: `npm run build` (esbuild -> `extension/dist/{extension.js,webview.js,webview.css}`, copies `engine/` to `extension/engine/`)
 - Typecheck: `npm run typecheck` (`tsc -p core && tsc -p extension && tsc -p webview`)
-- Test: `npm test` (`node --experimental-strip-types --test tests/*.test.ts`; 119 tests, ~55 s; needs `g++` and `gdb` because tests really compile and trace the examples)
+- Test: `npm test` (`node --experimental-strip-types --test tests/*.test.ts`; ~1 min; needs `g++` and `gdb` because tests really compile and trace the examples)
 - Package the .vsix: `npm run build && npm run package -w extension -- -o ../dsv.vsix` (`@vscode/vsce` devDependency of `extension/`; script `vsce package --no-dependencies`).
   `*.vsix` is gitignored (not tracked).
 - Trace a file and print the scenes: `npm run trace -- examples/binary-trees/bst.cpp [step|last] [--json]` (no arg: step count + program output).
@@ -22,7 +22,7 @@ Run from the repo root unless noted. All verified on this machine (Node 22, GDB,
 - Interactive: open `extension/` in VS Code, F5 (Extension Development Host), right-click a `.cpp` -> "Visualize Code".
 
 ## Architecture map
-- `engine/debugger/gdb_tracer.py`: GDB-side script. Single-steps the debuggee, reads memory, writes trace JSONL (schema v4). Observations only, no inference.
+- `engine/debugger/gdb_tracer.py`: GDB-side script. Single-steps the debuggee, reads memory, writes trace JSONL (schema v5). Observations only, no inference. `engine/debugger/linetable.py`: strict parser of `objdump --dwarf=decodedline` for sub-line stepping (no gdb import, fixture-tested).
 - `engine/runtime/shim.cpp`: `LD_PRELOAD` shim logging `operator new/delete` to an alloc log the tracer reads.
 - `core/`: pure TypeScript, no VS Code/Node-runtime coupling, shared by extension and webview.
   - `events/types.ts`: trace schema, `parseTrace`, `SCHEMA_VERSION` (see `docs/events.md`)
@@ -67,7 +67,7 @@ Known limitations are in [docs/limitations.md](docs/limitations.md); read it bef
 ## Roadmap (in order)
 - M7: done (malloc family tracking, see D14); remaining: nothing
 - M8: done (logical + internal views for map/set/multi*/list/deque/unordered_*; pointer cells carry `SNode.ref` for click-through, no cross-scene edges)
-- M9: per-write tracking (watchpoints on the active structure)
+- M9: sub-line stepping done (design A, DWARF rows + internal breakpoints, schema v5 `sub`, see D18 / `docs/architecture.md`); remaining: splitting writes inside one statement (design B, `nexti` + store detection, x86-64 only, not built)
 - M10: done (`.github/workflows/ci.yml`, see Commands > CI)
 - M11: bwrap sandbox for the traced run done (`dsv.sandbox`, `bwrapArgs` in runner.ts); remaining: seccomp filter, sandboxed compile step
 - M12: LLDB backend

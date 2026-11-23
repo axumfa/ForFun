@@ -27,7 +27,7 @@ export function Controls(p: { history: History; pb: Playback }) {
         <div className="ticks" aria-hidden="true">{ticks.map((t, k) => <span key={k} className={t.cls} style={{ left: `${last > 0 ? (t.i / last) * 100 : 0}%` }} />)}</div>
         <input type="range" min={0} max={Math.max(last, 0)} value={pb.index} onChange={(e) => pb.setIndex(Number(e.target.value))} aria-label="Execution timeline" />
       </div>
-      <span className="counter">step {h.length ? pb.index + 1 : 0}/{h.length}</span>
+      <span className="counter">step {h.length ? pb.index + 1 : 0}/{h.length}{h.steps[pb.index]?.sub ? <small title="intermediate state inside one source line"> · inside line (statement {h.steps[pb.index]!.sub})</small> : null}</span>
       <span className={`status ${end?.reason ?? ""}`}>{end ? ({ exited: `exited (${end.exitCode})`, step_limit: "⚠ truncated: step limit", crashed: `✖ crashed: ${end.signal}`, stalled: "⚠ stalled", timeout: "⚠ time limit", error: `✖ ${end.message ?? "error"}` } as Record<string, string>)[end.reason] : ""}</span>
     </footer>
   );

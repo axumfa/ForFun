@@ -1,5 +1,7 @@
-/** Trace schema v4. Documented in docs/events.md. Pure types + parser; no I/O, no VS Code, no debugger. */
-export const SCHEMA_VERSION = 4;
+/** Trace schema v5 (additive over v4: optional `sub`, `subStep`). Documented in docs/events.md. Pure types + parser; no I/O, no VS Code, no debugger. */
+export const SCHEMA_VERSION = 5;
+/** Versions `parseTrace` reads. v5 only added optional fields to v4, so v4 data loads unchanged. */
+export const SUPPORTED_SCHEMAS: readonly number[] = [4, 5];
 
 /** A pointer as observed in the debuggee. Only `kind: "object"` denotes a relationship to a tracked heap allocation. */
 export interface PointerValue {
@@ -75,6 +77,8 @@ export type TraceEvent =
 export interface Step {
   kind: "step"; schema: number; step: number;
   fn: string; file: FileKey; line: number; depth: number;
+  /** v5, optional: 1, 2, ... marks an intermediate stop *inside* `line` (state after the line's k-th statement); absent for the normal stop at a line's start. */
+  sub?: number;
   frames: Frame[];            // innermost first, user-code frames only
   events: TraceEvent[];
 }
@@ -83,6 +87,8 @@ export type EndReason = "exited" | "step_limit" | "error" | "crashed" | "stalled
 export interface EndRecord {
   kind: "end"; schema: number; reason: EndReason; exitCode: number | null;
   message?: string; signal?: string; line?: number; doubleFrees?: string[];
+  /** v5, optional: how sub-line stepping went (`note` = why it was off / not verified; `truncated` = lines that exceeded the per-line budget and were read whole). */
+  subStep?: { enabled: boolean; arch: string | null; subSteps: number; dropped: number; truncatedLines: number; budgetExceeded: boolean; armedAtEnd: number; truncated?: [string, number][]; note?: string };
 }
 export interface Trace { steps: Step[]; end: EndRecord | null; }
 
@@ -142,7 +148,7 @@ export function parseTrace(jsonl: string): Trace {
       throw new Error(`trace line ${i + 1}: invalid JSON`);
     }
     const r = rec as { kind?: string; schema?: number };
-    if (r.schema !== SCHEMA_VERSION) throw new Error(`trace line ${i + 1}: unsupported schema ${String(r.schema)}`);
+    if (typeof r.schema !== "number" || !SUPPORTED_SCHEMAS.includes(r.schema)) throw new Error(`trace line ${i + 1}: unsupported schema ${String(r.schema)}`);
     if (r.kind === "step") { const st = rec as Step; st.frames = prevFrames = expandFrames(st.frames as WireFrame[], prevFrames); if (hasSmart) normalizeStep(st); trace.steps.push(st); }
     else if (r.kind === "end") trace.end = rec as EndRecord;
     else throw new Error(`trace line ${i + 1}: unknown record kind ${String(r.kind)}`);

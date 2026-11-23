@@ -1,5 +1,5 @@
-# Trace schema v4
-Source of truth: `core/events/types.ts` (`SCHEMA_VERSION = 4`). The engine writes JSONL, every record carries `"schema": 4`; `parseTrace` rejects
+# Trace schema v5
+Source of truth: `core/events/types.ts` (`SCHEMA_VERSION = 5`). The engine writes JSONL, every record carries `"schema": 5`; v4 files are still read (`SUPPORTED_SCHEMAS`); `parseTrace` rejects
 other versions and unknown kinds (a truncated *last* line, from a killed run, is tolerated).
 
 ## Records
@@ -10,6 +10,9 @@ other versions and unknown kinds (a truncated *last* line, from a killed run, is
 
 ## Globals
 Variables with static storage declared in the user's source (file scope, `static`; not library globals) are carried as the **last** (outermost) frame of every step: `{fn: "(globals)", file: "main", line: 0, locals}`, in declaration order (`GLOBALS_FN` in `core/events/types.ts`). It is not a call frame: `depth` excludes it. Changes to a global appear as `local_changed` events. Function-local `static` variables are ordinary locals of their function. Added within schema v4 (older v4 traces simply lack the frame).
+
+## Sub-line stops (v5, additive)
+A `step` record may carry `sub: k` (1, 2, ...): an intermediate stop *inside* source line `line`, i.e. the state after the line's k-th statement; the normal record at the line's start has no `sub`. `events` are the effects since the previous record, so a sub stop's `cause` (History) is the same line. The `end` record may carry `subStep: {enabled, arch, subSteps, dropped, truncatedLines, budgetExceeded, armedAtEnd, truncated?: [file, line][], note?}`. Both are optional: v4 traces and lines that were not sub-stepped need no migration (`parseTrace` accepts schema 4 and 5).
 
 ## Frame deltas (v4)
 On the wire a frame may be a delta against the frame at the same depth *counted from the outermost* frame in the previous step (same `fn` and `file`):
@@ -42,4 +45,4 @@ ever see full frames. `DSV_NO_DELTA=1` makes the tracer write full frames (used 
 Freed objects keep their last known contents in `History` (shown dashed, only while something still points at them).
 
 ## Versioning
-Breaking changes bump `SCHEMA_VERSION`; there is no silent compatibility. v1-v3 traces are rejected (v3 added the `StlValue` variant, v4 the frame deltas).
+Breaking changes bump `SCHEMA_VERSION`; additive optional fields (v5: `sub`, `subStep`) keep older readable versions in `SUPPORTED_SCHEMAS`. v1-v3 traces are rejected (v3 added the `StlValue` variant, v4 the frame deltas).

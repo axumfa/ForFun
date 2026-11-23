@@ -1,9 +1,9 @@
-"""GDB backend: single-steps a -O0 -g debuggee and writes trace schema v4 (JSONL).
+"""GDB backend: single-steps a -O0 -g debuggee and writes trace schema v5 (JSONL).
 Run:  gdb -q -batch -x gdb_tracer.py --args ./prog    with DSV_* env vars (see CONFIG).
 Principle: every value written here was read from the debuggee's memory; nothing is inferred or invented."""
-import gdb, glob, itertools, json, os, re, signal, sys, threading, time
+import gdb, glob, itertools, json, os, re, signal, subprocess, sys, threading, time
 
-SCHEMA = 4
+SCHEMA = 5
 E = os.environ
 MAX_STEPS = int(E.get("DSV_MAX_STEPS", "20000"))
 STALL_SECONDS = float(E.get("DSV_STALL_SECONDS", "3"))      # max wall time inside ONE gdb `step`
@@ -11,6 +11,10 @@ MAX_OBJECTS = int(E.get("DSV_MAX_OBJECTS", "3000"))
 MAX_ELEMS = 512
 MAX_STL = int(E.get("DSV_MAX_STL_ELEMS", "200"))   # entries read per STL container per step (the rest is only counted)
 NO_PRINTERS = E.get("DSV_NO_PRINTERS") == "1"      # test hook: behave as if no libstdc++ pretty-printers exist
+# M9 sub-line stepping: budgets (a line that exceeds either falls back to the per-line read), kill switch
+SUBSTEP = E.get("DSV_SUBSTEP", "1") != "0"
+SUB_LINE = int(E.get("DSV_SUBSTEP_LINE", "64"))     # max sub-stops per execution of one line
+SUB_RUN = int(E.get("DSV_SUBSTEP_RUN", "5000"))     # max sub-stops (snapshots) per run
 SRC = os.path.realpath(E["DSV_SRC"])
 DRIVER = os.path.realpath(E["DSV_DRIVER"]) if E.get("DSV_DRIVER") else None
 OUT = open(E["DSV_OUT"], "w")
@@ -617,8 +621,108 @@ def write(rec):
     if rec.get("kind") == "step" and os.environ.get("DSV_NO_DELTA") != "1": rec["frames"] = encode_frames(rec["frames"])
     rec["schema"] = SCHEMA; OUT.write(json.dumps(rec, separators=(",", ":")) + "\n"); OUT.flush()
 
+# --- M9: sub-line stepping. Internal breakpoints at the DWARF rows (statements) of the line being executed; `step` is interrupted at each,
+# a snapshot is taken (dropped when nothing changed) and `step` continues. Breakpoints are removed on every way a step can end (disarm_all). ---
+sub = {"table": None, "failed": None, "bias": None, "ok": {}, "run": 0, "steps": 0, "dropped": 0, "truncated": 0, "budget": False, "live": 0, "arch": None, "note": None, "trunc_lines": []}
+armed = []          # contexts of the lines being executed, outermost first; every context's frame is a strict ancestor of the next one's
+
+def sub_log(msg):
+    sub["note"] = sub["note"] or msg
+    sys.stderr.write("dsv: " + msg + "\n"); sys.stderr.flush()
+
+def sub_init():
+    """Parse the line rows once per binary (this process traces exactly one). Any failure disables sub-stepping for the run, with the reason logged."""
+    if sub["table"] is not None or sub["failed"]: return
+    try:
+        sys.path.insert(0, E.get("DSV_TRACER_DIR") or os.path.dirname(os.path.abspath(globals().get("__file__", "."))))
+        import linetable
+        sub["lt"] = linetable
+        sub["arch"] = gdb.selected_inferior().architecture().name() if hasattr(gdb.Inferior, "architecture") else "unknown"
+        if sub["arch"] != "i386:x86-64": sub_log("sub-stepping not verified on %s (enabled anyway)" % sub["arch"])
+        prog = gdb.current_progspace().filename
+        r = subprocess.run([E.get("DSV_OBJDUMP", "objdump"), "--dwarf=decodedline", prog], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
+        if r.returncode != 0: raise RuntimeError("objdump failed: " + r.stderr.decode("utf8", "replace")[:200])
+        sub["table"] = linetable.Table(linetable.parse(r.stdout.decode("utf8", "replace")))
+    except FileNotFoundError: sub["failed"] = "objdump not found"
+    except Exception as e: sub["failed"] = "line table unavailable: %s" % (e,)
+    if sub["failed"]: sub_log("sub-stepping off (%s); lines are read whole" % sub["failed"])
+
+def sub_bias(sal, fname):
+    ok = sub["ok"]
+    if fname in ok: return ok[fname]
+    b = None
+    try:
+        g = [(it.line, it.pc) for it in sal.symtab.linetable()]
+        b = sub["lt"].find_bias(g, sub["table"], fname)
+    except Exception: b = None
+    ok[fname] = b
+    if b is None: sub_log("line table of %s does not match gdb's; its lines are read whole" % fname)
+    return b
+
+class RowBp(gdb.Breakpoint):
+    def __init__(self, addr, ctx):
+        self.ctx = ctx
+        super().__init__("*0x%x" % addr, internal=True); sub["live"] += 1
+    def stop(self):
+        c = self.ctx
+        try:
+            if c["off"] or gdb.newest_frame() != c["frame"]: return False      # another frame (recursion) or already over budget: let `step` run on
+            if sub["run"] >= SUB_RUN: sub["budget"] = True; c["off"] = True; return False
+            if c["n"] >= SUB_LINE: c["trunc"] = True; c["off"] = True; sub["truncated"] += 1; sub["trunc_lines"].append([c["file"], c["line"]]); return False
+            c["n"] += 1; sub["run"] += 1; c["hit"] = True
+            return True
+        except Exception: return False
+
+def disarm(c):
+    for b in c["bps"]:
+        try: b.delete()
+        except Exception: pass
+        sub["live"] -= 1
+    c["bps"] = []
+
+def disarm_all():
+    while armed: disarm(armed.pop())
+
+def frame_is_strict_ancestor(anc, f):
+    try:
+        o = f.older()
+        while o is not None:
+            if o == anc: return True
+            o = o.older()
+    except gdb.error: pass
+    return False
+
+def reconcile_and_arm(fk, sal):
+    """Called at every normal line arrival: contexts that are not strict ancestors of the current frame are over (disarmed); the line's rows are armed."""
+    f = gdb.newest_frame()
+    while armed and not frame_is_strict_ancestor(armed[-1]["frame"], f): disarm(armed.pop())
+    if not SUBSTEP or sub["failed"] or sub["budget"]: return
+    sub_init()
+    if sub["failed"]: return
+    fname = os.path.basename(sal.symtab.filename)
+    b = sub_bias(sal, fname)
+    if b is None: return
+    addrs = [a + b for a in sub["table"].after(gdb.selected_frame().pc() - b, fname, sal.line)]
+    if not addrs: return                                   # single-statement lines keep today's behaviour
+    c = {"frame": f, "file": fk, "line": sal.line, "bps": [], "n": 0, "emitted": 0, "off": False, "hit": False, "trunc": False}
+    armed.append(c)
+    for a in addrs: c["bps"].append(RowBp(a, c))
+
+def take_hit():
+    """The context whose row breakpoint stopped the last `step` (contexts above it belong to frames that are gone)."""
+    for i, c in enumerate(armed):
+        if c["hit"]:
+            c["hit"] = False
+            while len(armed) > i + 1: disarm(armed.pop())
+            return c
+    return None
+
 def end(reason, code=None, message=None, **extra):
+    disarm_all()
     r = {"kind": "end", "reason": reason, "exitCode": code}
+    r["subStep"] = {"enabled": SUBSTEP and not sub["failed"], "arch": sub["arch"], "subSteps": sub["steps"], "dropped": sub["dropped"], "truncatedLines": sub["truncated"],
+                    "budgetExceeded": sub["budget"], "armedAtEnd": sub["live"], "truncated": sub["trunc_lines"][:20]}
+    if sub["failed"] or sub["note"]: r["subStep"]["note"] = sub["failed"] or sub["note"]
     if message: r["message"] = message
     r.update(extra)
     if double_frees: r["doubleFrees"] = double_frees
@@ -656,7 +760,7 @@ def main():
     gdb.execute("set exec-wrapper env LD_PRELOAD=%s DSV_ALLOC_LOG=%s" % (E["DSV_SHIM"], LOG))
     gdb.execute("break main")
     gdb.execute("run > %s < /dev/null" % E["DSV_PROG_OUT"], to_string=True)
-    prev = {"frames": [], "objects": {}}; n = 0
+    prev = {"frames": [], "objects": {}}; n = 0; hit = None; subk = 0
     while True:
         if n >= MAX_STEPS: return end("step_limit", None, "stopped after %d steps" % n)
         try:
@@ -667,12 +771,25 @@ def main():
                 finally: deadline[0] = None
                 continue
             cur = snapshot(); fr = cur["frames"][0]
-            write({"kind": "step", "step": n, "fn": fr["fn"], "file": fr["file"], "line": sal.line, "depth": user_depth(cur["frames"]),
-                   "frames": cur["frames"], "events": diff(prev, cur)})
-            n += 1; prev = cur
+            if hit is not None:
+                if cur["frames"] == prev["frames"] and cur["objects"] == prev["objects"]: sub["dropped"] += 1       # nothing changed here: not a stop worth showing
+                else:
+                    hit["emitted"] += 1; subk = hit["emitted"]; sub["steps"] += 1
+                    write({"kind": "step", "step": n, "sub": subk, "fn": fr["fn"], "file": fr["file"], "line": sal.line, "depth": user_depth(cur["frames"]),
+                           "frames": cur["frames"], "events": diff(prev, cur)})
+                    n += 1; prev = cur
+                hit = None
+            else:
+                subk = 0
+                try: reconcile_and_arm(file_key(sal), sal)
+                except Exception as e: sub_log("sub-stepping error: %r" % (e,))
+                write({"kind": "step", "step": n, "fn": fr["fn"], "file": fr["file"], "line": sal.line, "depth": user_depth(cur["frames"]),
+                       "frames": cur["frames"], "events": diff(prev, cur)})
+                n += 1; prev = cur
             stalled[0] = False; deadline[0] = time.time() + STALL_SECONDS
             try: out = gdb.execute("step", to_string=True)
             finally: deadline[0] = None
+            hit = take_hit()
             if stalled[0] and alive():
                 return end("stalled", None, "execution stayed on line %d for more than %.0fs (tight loop on a single line?)" % (sal.line, STALL_SECONDS), line=sal.line)
             if last_signal[0] and last_signal[0] != "SIGINT" and alive():
