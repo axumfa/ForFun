@@ -192,3 +192,71 @@ test("line-row parser: older layout without View/Stmt columns", () => {
 test("line-row parser is strict: an unrecognised line is an error, never a partial table", () => {
   assert.match(lt("objdump-bad.txt").error, /not understood/);
 });
+
+// --- loop headers whose body is on other lines are not sub-stepped (their stops only repeat the body's first state) ---
+const subsOn = (steps: Step[], text: string, code: string) => onLine(steps, text, code).filter((s) => s.sub !== undefined);
+const hdr = (src: string) => lt("objdump-2.47.txt", "m9.cpp", "5", "0x401162") && JSON.parse(execFileSync("python3", ["-I", path.join(root, "engine/debugger/linetable.py"), "header", src], { encoding: "utf8" })).header as boolean;
+
+test("loop-header rule on source text: comments are ignored, one-line loops are not headers", () => {
+  assert.equal(hdr("  for (int i = 0; i < n; i++) {"), true);
+  assert.equal(hdr("  while (c != nullptr)"), true);
+  assert.equal(hdr("  for (int i = 0;   // { not a body"), true);                // split header, comment holds a brace
+  assert.equal(hdr("      i < n; i++) {"), true);                                // continuation line of a split header
+  assert.equal(hdr("  for (auto x : v) /* { */ {"), true);
+  assert.equal(hdr("  for (int i = 0; i < n; i++) // { a += i; }"), true);       // the "body" is a comment
+  assert.equal(hdr("  for (int i = 0; i < 3; i++) { a += i; b += a; }"), false);
+  assert.equal(hdr("  while (c) { x++; }"), false);
+  assert.equal(hdr("  for (;;) x++;"), false);
+  assert.equal(hdr("  } while (c);"), false);
+  assert.equal(hdr("  tmp = a; a = b; b = tmp;"), false);
+});
+
+const LOOPS = `int main() {
+  int sum = 0, k = 0, j = 0, m = 0;
+  for (int i = 0; i < 4; i++) {
+    sum += i;
+  }
+  while (k < 4)
+  {
+    k++;
+  }
+  for (j = 0;
+       j < 4; j++) {
+    sum += j;
+  }
+  for (int i = 0; i < 4; i++) { // { trailing comment with a brace
+    m += i;
+  }
+  int a = 1, b = 2, t = 0;
+  t = a; a = b; b = t;
+  return sum + k + m + (a - b) * 0 > 0 ? 0 : 1;
+}
+`;
+test("header-only for/while (also split over lines, with a `{` in a trailing comment) are not sub-stepped; a later swap still is", async () => {
+  const r = await trace(LOOPS);
+  const lines = LOOPS.split("\n");
+  const headers = ["for (int i = 0; i < 4; i++) {", "while (k < 4)", "for (j = 0;", "j < 4; j++) {", "i++) { // {"].map((t) => lines.findIndex((x) => x.includes(t)) + 1);
+  assert.ok(headers.every((n) => n > 0));
+  for (const n of headers) assert.equal(r.trace.steps.filter((s) => s.line === n && s.sub !== undefined).length, 0, "header line " + n);
+  assert.equal(subsOn(r.trace.steps, "t = a; a = b", LOOPS).length, 2);
+  const swapLine = lines.findIndex((x) => x.includes("t = a; a = b")) + 1;
+  const declLine = lines.findIndex((x) => x.includes("int a = 1, b = 2, t = 0;")) + 1;      // multi-declaration lines are legitimately split too
+  const decl0 = lines.findIndex((x) => x.includes("int sum = 0, k = 0")) + 1;
+  assert.deepEqual([...new Set(r.trace.steps.filter((s) => s.sub !== undefined).map((s) => s.line))].sort((x, y) => x - y), [decl0, declLine, swapLine], "only statement lines are split, no loop header");
+});
+
+test("a header-only loop does not eat the run budget: the swap after 2000 iterations is still split", async () => {
+  const code = `int main() {
+  int s = 0;
+  for (int i = 0; i < 2000; i++) {
+    s++;
+  }
+  int a = 1, b = 2, t = 0;
+  t = a; a = b; b = t;
+  return s > 0 ? 0 : 1;
+}
+`;
+  const r = await trace(code, { maxSubStepsPerRun: 50 });
+  assert.equal(r.trace.end?.subStep?.budgetExceeded, false);
+  assert.equal(subsOn(r.trace.steps, "t = a; a = b", code).length, 2);
+});

@@ -623,7 +623,7 @@ def write(rec):
 
 # --- M9: sub-line stepping. Internal breakpoints at the DWARF rows (statements) of the line being executed; `step` is interrupted at each,
 # a snapshot is taken (dropped when nothing changed) and `step` continues. Breakpoints are removed on every way a step can end (disarm_all). ---
-sub = {"table": None, "failed": None, "bias": None, "ok": {}, "run": 0, "steps": 0, "dropped": 0, "truncated": 0, "budget": False, "live": 0, "arch": None, "note": None, "trunc_lines": []}
+sub = {"table": None, "failed": None, "bias": None, "ok": {}, "run": 0, "steps": 0, "dropped": 0, "truncated": 0, "budget": False, "live": 0, "arch": None, "note": None, "trunc_lines": [], "dropped_by": {}}
 armed = []          # contexts of the lines being executed, outermost first; every context's frame is a strict ancestor of the next one's
 
 def sub_log(msg):
@@ -646,6 +646,14 @@ def sub_init():
     except FileNotFoundError: sub["failed"] = "objdump not found"
     except Exception as e: sub["failed"] = "line table unavailable: %s" % (e,)
     if sub["failed"]: sub_log("sub-stepping off (%s); lines are read whole" % sub["failed"])
+
+_src_lines = {}
+def is_header(fk, line):
+    try:
+        if fk not in _src_lines: _src_lines[fk] = open(SRC if fk == "main" else DRIVER, encoding="utf8", errors="replace").read().split("\n")
+        t = _src_lines[fk]
+        return 0 < line <= len(t) and sub["lt"].is_loop_header(t[line - 1])
+    except Exception: return False
 
 def sub_bias(sal, fname):
     ok = sub["ok"]
@@ -704,6 +712,7 @@ def reconcile_and_arm(fk, sal):
     if b is None: return
     addrs = [a + b for a in sub["table"].after(gdb.selected_frame().pc() - b, fname, sal.line)]
     if not addrs: return                                   # single-statement lines keep today's behaviour
+    if is_header(fk, sal.line): return                     # `for (...) {` / `while (...)` with the body on other lines: its stops only repeat the body's first state
     c = {"frame": f, "file": fk, "line": sal.line, "bps": [], "n": 0, "emitted": 0, "off": False, "hit": False, "trunc": False}
     armed.append(c)
     for a in addrs: c["bps"].append(RowBp(a, c))
@@ -721,7 +730,8 @@ def end(reason, code=None, message=None, **extra):
     disarm_all()
     r = {"kind": "end", "reason": reason, "exitCode": code}
     r["subStep"] = {"enabled": SUBSTEP and not sub["failed"], "arch": sub["arch"], "subSteps": sub["steps"], "dropped": sub["dropped"], "truncatedLines": sub["truncated"],
-                    "budgetExceeded": sub["budget"], "armedAtEnd": sub["live"], "truncated": sub["trunc_lines"][:20]}
+                    "budgetExceeded": sub["budget"], "armedAtEnd": sub["live"], "truncated": sub["trunc_lines"][:20],
+                    "droppedByLine": [[l, c] for l, c in sorted(sub["dropped_by"].items(), key=lambda x: -x[1])[:5]]}
     if sub["failed"] or sub["note"]: r["subStep"]["note"] = sub["failed"] or sub["note"]
     if message: r["message"] = message
     r.update(extra)
@@ -772,7 +782,7 @@ def main():
                 continue
             cur = snapshot(); fr = cur["frames"][0]
             if hit is not None:
-                if cur["frames"] == prev["frames"] and cur["objects"] == prev["objects"]: sub["dropped"] += 1       # nothing changed here: not a stop worth showing
+                if cur["frames"] == prev["frames"] and cur["objects"] == prev["objects"]: sub["dropped"] += 1; sub["dropped_by"][sal.line] = sub["dropped_by"].get(sal.line, 0) + 1       # nothing changed here: not a stop worth showing
                 else:
                     hit["emitted"] += 1; subk = hit["emitted"]; sub["steps"] += 1
                     write({"kind": "step", "step": n, "sub": subk, "fn": fr["fn"], "file": fr["file"], "line": sal.line, "depth": user_depth(cur["frames"]),

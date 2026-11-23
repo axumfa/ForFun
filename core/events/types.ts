@@ -88,7 +88,7 @@ export interface EndRecord {
   kind: "end"; schema: number; reason: EndReason; exitCode: number | null;
   message?: string; signal?: string; line?: number; doubleFrees?: string[];
   /** v5, optional: how sub-line stepping went (`note` = why it was off / not verified; `truncated` = lines that exceeded the per-line budget and were read whole). */
-  subStep?: { enabled: boolean; arch: string | null; subSteps: number; dropped: number; truncatedLines: number; budgetExceeded: boolean; armedAtEnd: number; truncated?: [string, number][]; note?: string };
+  subStep?: { enabled: boolean; arch: string | null; subSteps: number; dropped: number; truncatedLines: number; budgetExceeded: boolean; armedAtEnd: number; truncated?: [string, number][]; droppedByLine?: [number, number][]; note?: string };
 }
 export interface Trace { steps: Step[]; end: EndRecord | null; }
 
