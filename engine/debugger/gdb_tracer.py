@@ -101,6 +101,11 @@ def read_struct_fields(v, t, objs, depth):
     for f in t.fields():
         if f.is_base_class:
             fields.update(read_struct_fields(v[f], f.type.strip_typedefs(), objs, depth)); continue
+        if not f.name:                               # anonymous struct/union member: its members belong to the enclosing aggregate
+            ft = f.type.strip_typedefs()
+            if ft.code in (gdb.TYPE_CODE_STRUCT, gdb.TYPE_CODE_UNION) and getattr(f, "bitpos", None) is not None:
+                fields.update(read_struct_fields(v[f], ft, objs, depth))
+            continue
         if f.name and not hasattr(f, "enumval"):
             if f.bitpos is None: continue            # static member
             fields[f.name] = read_val(v[f.name], objs, depth + 1)
