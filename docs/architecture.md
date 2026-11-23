@@ -120,3 +120,12 @@ that no drawn edge lacks a corresponding observed pointer at any step of any exa
 - Only lines with >= 2 contiguous rows are armed; single-row lines behave exactly as before. Loop-header lines (source text is only a `for`/`while` header, comments stripped; see `is_loop_header`) are not armed: measured on a 300-node list build + 3 traversal loops, headers produced 1004 of 1058 sub-stops. Stops that change nothing are dropped (still counted against the budgets).
 - Not x86-64 specific. Only x86-64 is tested; elsewhere it logs "not verified" and stays on.
 **Not built (design B).** `nexti` with store detection would split writes inside a single statement (`a = b = c = 5`; measured 3 stores / 5 instructions, ~1.1 ms per instruction). It is per-architecture (x86-64 AT&T last-operand heuristic), so if built it is gated to x86-64. See `docs/limitations.md` for what is not split.
+
+**Benchmark (motivation for M13, incremental snapshots).** Program: build a 300-node linked list, three traversal loops (300, 300, 100 iterations), a one-line `while` delete loop, one one-line swap (Fedora, GCC 16.2.1, GDB 18.1; wall time includes compile and the bwrap start):
+| | trace time | visible stops | sub-steps used (of 5000) |
+|---|---|---|---|
+| sub-stepping off | 38-43 s | 2914 | 0 |
+| on, loop headers armed (before the header rule) | 68 s | 3972 | 1058 shown + 318 dropped |
+| on, with the header rule | 45 s | 2968 | 54 shown + 318 dropped |
+Baseline cost is ~13-15 ms per stop, and a sub-stop costs the same ~18 ms as any stop, because `snapshot()` re-reads every live heap object (and every local) on every stop; the list grows to 300 objects, so a stop late in the run is dearer than an early one. Sub-stepping multiplies the stop count, so it multiplies this cost; cutting the per-stop cost (M13) benefits both. The 318 dropped stops come from body lines that have two rows with nothing changed at the second (`sum += c->val;`, one per iteration): they cost a snapshot each and count against the budgets (`subStep.droppedByLine`).
+
