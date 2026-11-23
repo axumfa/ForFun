@@ -6,3 +6,4 @@ poc/trace*.jsonl
 poc/alloc.log
 *.vsix
 CLAUDE.local.md
+__pycache__
