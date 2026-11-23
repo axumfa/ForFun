@@ -86,7 +86,7 @@ test("budget per line: a line over it is read whole from then on (truncated), th
   return a > 0 ? 0 : 1;
 }
 `;
-  const full = await trace(code), cut = await trace(code, { maxSubStepsPerLine: 6 });
+  const full = await trace(code, { maxSubStepsPerLine: 100000 }), cut = await trace(code, { maxSubStepsPerLine: 6 });
   const st = onLine(cut.trace.steps, "for (int i", code);
   const shown = st.filter((s) => s.sub !== undefined).length;
   assert.ok(shown >= 1 && shown <= 6, `shown ${shown}`);                  // stops that changed nothing count against the budget but are not shown
@@ -97,6 +97,10 @@ test("budget per line: a line over it is read whole from then on (truncated), th
   const last = (t: typeof full) => t.trace.steps.at(-1)!.frames[0]!.locals;
   assert.equal(JSON.stringify(last(cut)), JSON.stringify(last(full)));
   assert.equal(cut.trace.end?.subStep?.armedAtEnd, 0);
+  const marks = cut.trace.steps.filter((s) => s.subCut);                                   // the cut is visible on exactly one stop, the one that shows the rest whole
+  assert.equal(marks.length, 1); assert.deepEqual(marks[0]!.subCut, { why: "line", limit: 6, line: 3 });
+  assert.equal(marks[0]!.sub, undefined);
+  assert.ok(full.trace.steps.every((s) => !s.subCut));
 });
 
 test("budget per run: once spent, lines are read whole", async () => {
@@ -104,6 +108,8 @@ test("budget per run: once spent, lines are read whole", async () => {
   assert.equal(r.trace.end?.subStep?.budgetExceeded, true);
   assert.equal(r.trace.steps.filter((s) => s.sub !== undefined).length, 1);
   assert.equal(r.trace.end?.reason, "exited");
+  const marks = r.trace.steps.filter((s) => s.subCut);
+  assert.equal(marks.length, 1); assert.deepEqual(marks[0]!.subCut, { why: "run", limit: 1 });
 });
 
 test("recursion: only the frame that owns the line is sub-stepped", async () => {

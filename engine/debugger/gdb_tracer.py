@@ -618,12 +618,13 @@ def encode_frames(frames):
     return out
 
 def write(rec):
+    if rec.get("kind") == "step" and sub["cut"]: rec["subCut"] = sub["cut"]; sub["cut"] = None     # first record after a budget cut: the rest was shown whole
     if rec.get("kind") == "step" and os.environ.get("DSV_NO_DELTA") != "1": rec["frames"] = encode_frames(rec["frames"])
     rec["schema"] = SCHEMA; OUT.write(json.dumps(rec, separators=(",", ":")) + "\n"); OUT.flush()
 
 # --- M9: sub-line stepping. Internal breakpoints at the DWARF rows (statements) of the line being executed; `step` is interrupted at each,
 # a snapshot is taken (dropped when nothing changed) and `step` continues. Breakpoints are removed on every way a step can end (disarm_all). ---
-sub = {"table": None, "failed": None, "bias": None, "ok": {}, "run": 0, "steps": 0, "dropped": 0, "truncated": 0, "budget": False, "live": 0, "arch": None, "note": None, "trunc_lines": [], "dropped_by": {}}
+sub = {"table": None, "failed": None, "bias": None, "ok": {}, "run": 0, "steps": 0, "dropped": 0, "truncated": 0, "budget": False, "live": 0, "arch": None, "note": None, "trunc_lines": [], "dropped_by": {}, "cut": None}
 armed = []          # contexts of the lines being executed, outermost first; every context's frame is a strict ancestor of the next one's
 
 def sub_log(msg):
@@ -675,8 +676,8 @@ class RowBp(gdb.Breakpoint):
         c = self.ctx
         try:
             if c["off"] or gdb.newest_frame() != c["frame"]: return False      # another frame (recursion) or already over budget: let `step` run on
-            if sub["run"] >= SUB_RUN: sub["budget"] = True; c["off"] = True; return False
-            if c["n"] >= SUB_LINE: c["trunc"] = True; c["off"] = True; sub["truncated"] += 1; sub["trunc_lines"].append([c["file"], c["line"]]); return False
+            if sub["run"] >= SUB_RUN: sub["budget"] = True; c["off"] = True; sub["cut"] = sub["cut"] or {"why": "run", "limit": SUB_RUN}; return False
+            if c["n"] >= SUB_LINE: c["trunc"] = True; c["off"] = True; sub["truncated"] += 1; sub["trunc_lines"].append([c["file"], c["line"]]); sub["cut"] = sub["cut"] or {"why": "line", "limit": SUB_LINE, "line": c["line"]}; return False
             c["n"] += 1; sub["run"] += 1; c["hit"] = True
             return True
         except Exception: return False

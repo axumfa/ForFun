@@ -48,7 +48,7 @@ button.link { background:none; border:0; color: var(--acc); cursor:pointer; padd
 .controls button.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); } .controls button:disabled { opacity:.4; cursor:default; }
 .timeline { position:relative; flex:1; min-width:160px; height: 26px; } .timeline input { position:absolute; inset:10px 0 0 0; width:100%; margin:0; }
 .ticks { position:absolute; inset:0 0 auto 0; height:8px; } .ticks span { position:absolute; top:0; width:3px; height:8px; margin-left:-1px; }
-.tk-alloc { background: var(--ok); } .tk-free { background: var(--bad); top:2px !important; } .tk-bad { background: var(--warn); width:5px !important; }
+.tk-alloc { background: var(--ok); } .tk-free { background: var(--bad); top:2px !important; } .tk-bad { background: var(--warn); width:5px !important; } .tk-cut { background: var(--warn); width:5px !important; top:0 !important; opacity:.7; }
 .status.crashed, .status.error { color: var(--bad); } .status.stalled, .status.step_limit, .status.timeout { color: var(--warn); } .counter { opacity:.8; }
 @media (max-width: 900px) { .layout { grid-template-columns: 1fr; grid-template-rows: auto auto auto auto; height:auto; } .code { max-height: 220px; } }
 @media (prefers-reduced-motion: reduce) { .node { transition: none; } }

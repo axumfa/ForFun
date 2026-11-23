@@ -9,9 +9,12 @@ export function Controls(p: { history: History; pb: Playback }) {
     const t: { i: number; cls: string }[] = [];
     if (s.events.some((e) => e.type === "object_created")) t.push({ i: s.step, cls: "tk-alloc" });
     if (s.events.some((e) => e.type === "object_freed")) t.push({ i: s.step, cls: "tk-free" });
+    if (s.subCut) t.push({ i: s.step, cls: "tk-cut" });
     return t;
   });
   if (end && end.reason !== "exited" && last >= 0) ticks.push({ i: last, cls: "tk-bad" });
+  const cur = h.steps[pb.index], cut = cur?.subCut;
+  const cutText = cut ? (cut.why === "line" ? `sub-steps stopped after ${cut.limit} on line ${cut.line}; the rest of that line is shown whole` : `sub-step budget of this run (${cut.limit}) used up; later lines are shown whole`) : "";
   return (
     <footer className="controls">
       <button onClick={pb.reset} disabled={pb.index === 0 && !pb.playing} title="Reset (Home)">⏮ Reset</button>
@@ -28,6 +31,7 @@ export function Controls(p: { history: History; pb: Playback }) {
         <input type="range" min={0} max={Math.max(last, 0)} value={pb.index} onChange={(e) => pb.setIndex(Number(e.target.value))} aria-label="Execution timeline" />
       </div>
       <span className="counter">step {h.length ? pb.index + 1 : 0}/{h.length}{h.steps[pb.index]?.sub ? <small title="intermediate state inside one source line"> · inside line (statement {h.steps[pb.index]!.sub})</small> : null}</span>
+      {cut && <span className="status stalled" title={cutText}>⚠ {cutText}</span>}
       <span className={`status ${end?.reason ?? ""}`}>{end ? ({ exited: `exited (${end.exitCode})`, step_limit: "⚠ truncated: step limit", crashed: `✖ crashed: ${end.signal}`, stalled: "⚠ stalled", timeout: "⚠ time limit", error: `✖ ${end.message ?? "error"}` } as Record<string, string>)[end.reason] : ""}</span>
     </footer>
   );

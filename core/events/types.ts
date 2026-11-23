@@ -79,6 +79,8 @@ export interface Step {
   fn: string; file: FileKey; line: number; depth: number;
   /** v5, optional: 1, 2, ... marks an intermediate stop *inside* `line` (state after the line's k-th statement); absent for the normal stop at a line's start. */
   sub?: number;
+  /** v5, optional: sub-stepping stopped before this record because a budget ran out (`line`: per-line limit on `line`; `run`: per-run limit); what changed since the previous record is the rest of that line (or later lines) shown whole. */
+  subCut?: { why: "line" | "run"; limit: number; line?: number };
   frames: Frame[];            // innermost first, user-code frames only
   events: TraceEvent[];
 }
