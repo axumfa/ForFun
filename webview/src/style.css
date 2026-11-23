@@ -10,6 +10,7 @@ body { margin:0; font-family: var(--vscode-font-family); font-size: 13px; color:
 .line { display:flex; white-space:pre; padding-right:8px; } .ln { width:3.2em; text-align:right; padding-right:1em; opacity:.45; flex:none; user-select:none; }
 .current { background: var(--vscode-editor-findMatchHighlightBackground, #ea5c0055); outline: 1px solid var(--acc); }
 .executed { background: var(--vscode-diffEditor-insertedTextBackground, #9bb95533); }
+.src mark { color: inherit; border-radius: 2px; } .stmt-next { background: var(--vscode-editor-findMatchBackground, #ea5c0099); outline: 1px solid var(--acc); } .stmt-ran { background: var(--vscode-diffEditor-insertedTextBackground, #9bb95566); }
 .tag { margin-left:auto; padding-left:12px; font-size:10px; opacity:.7; font-family: var(--vscode-font-family); }
 .tabs { display:flex; gap:2px; border-bottom:1px solid var(--vscode-panel-border); padding: 4px 6px 0; }
 .tabs button { background:transparent; color:inherit; border:0; border-bottom:2px solid transparent; padding:4px 8px; cursor:pointer; opacity:.7; }

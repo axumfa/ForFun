@@ -1,13 +1,28 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { GLOBALS_FN, type FileKey, type Value } from "../../../core/events/types.ts";
 import type { History, HeapObject, RuntimeState } from "../../../core/snapshots/history.ts";
 import type { Scene } from "../../../core/models/scene.ts";
 import { describeObject, describeValue, explainStep } from "../../../core/explain/explain.ts";
 import { analyzeSource } from "../../../core/analysis/static.ts";
 import { findings, observedCost, suggestions } from "../../../core/analysis/findings.ts";
+import { statementRange } from "../../../core/explain/columns.ts";
 import { collectRoots, isArr, isPtr, isStl, isStruct } from "../../../core/adapters/analysis.ts";
 
-export function SourcePanel(p: { sources: Record<string, string>; file: FileKey; line: number; executed: { file: FileKey; line: number } | null }) {
+/** The line's text with the statement about to run (`col`) and the one that just ran (`executedCol`, same line) marked; no column = the whole line is the highlight. */
+function marked(t: string, col?: number, executedCol?: number) {
+  const next = statementRange(t, col), ran = statementRange(t, executedCol);
+  const ranges: { r: [number, number]; cls: string }[] = [];
+  if (next) ranges.push({ r: next, cls: "stmt-next" });
+  if (ran && (!next || ran[1] <= next[0] || ran[0] >= next[1])) ranges.push({ r: ran, cls: "stmt-ran" });
+  ranges.sort((a, b) => a.r[0] - b.r[0]);
+  if (!ranges.length) return t || " ";
+  const out: ReactNode[] = []; let at = 0;
+  ranges.forEach((m, i) => { if (m.r[0] > at) out.push(<span key={"p" + i}>{t.slice(at, m.r[0])}</span>); out.push(<mark key={"m" + i} className={m.cls}>{t.slice(m.r[0], m.r[1])}</mark>); at = m.r[1]; });
+  if (at < t.length) out.push(<span key="tail">{t.slice(at)}</span>);
+  return out;
+}
+
+export function SourcePanel(p: { sources: Record<string, string>; file: FileKey; line: number; col?: number; executedCol?: number; executed: { file: FileKey; line: number } | null }) {
   const [peek, setPeek] = useState<{ base: FileKey; file: string } | null>(null);
   const shown = peek && peek.base === p.file ? peek.file : p.file;
   const lines = (p.sources[shown] ?? "").split("\n");
@@ -20,7 +35,7 @@ export function SourcePanel(p: { sources: Record<string, string>; file: FileKey;
           const cur = shown === p.file && n + 1 === p.line, ex = p.executed && shown === p.executed.file && n + 1 === p.executed.line && !cur;
           return (
             <div key={n} className={`line${cur ? " current" : ""}${ex ? " executed" : ""}`} ref={(el) => { if (el && cur) el.scrollIntoView({ block: "nearest" }); }}>
-              <span className="ln">{n + 1}</span><span className="src">{t || " "}</span>{cur && <span className="tag">next</span>}{ex && <span className="tag">just ran</span>}
+              <span className="ln">{n + 1}</span><span className="src">{cur ? marked(t, p.col, p.executed && p.executed.file === p.file && p.executed.line === p.line ? p.executedCol : undefined) : t || " "}</span>{cur && <span className="tag">next</span>}{ex && <span className="tag">just ran</span>}
             </div>
           );
         })}

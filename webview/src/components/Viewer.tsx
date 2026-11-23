@@ -36,7 +36,7 @@ export function Viewer(p: ViewerProps) {
   const pickNode = (id: string | null, fallback?: string) => { const shown = id !== null && scenes.some((s) => s.nodes.some((n) => n.id === id)); setSel(id === null ? null : shown ? id : fallback ?? id); if (id) setTab("inspect"); };
   return (
     <div className="layout">
-      <SourcePanel sources={p.sources} file={state.file} line={state.line} executed={state.cause ? { file: state.cause.file, line: state.cause.line } : null} />
+      <SourcePanel sources={p.sources} file={state.file} line={state.line} col={history.steps[state.step]?.col} executedCol={state.cause ? history.steps[state.cause.step]?.col : undefined} executed={state.cause ? { file: state.cause.file, line: state.cause.line } : null} />
       <section className="center" aria-label="Data structures">
         {scenes.length === 0 && <p className="muted pad">No recognised data structure is alive at this step. Variables are in the right panel.</p>}
         {scenes.map((s) => <SceneView key={s.id} scene={s} selected={sel} onSelect={pickNode} onView={p.onStlView} />)}
