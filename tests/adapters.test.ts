@@ -4,6 +4,7 @@ import { load, stepAt, scenesAt, chain, ptrTarget, outEdges } from "./helpers.ts
 import { isPtr } from "../core/adapters/analysis.ts";
 import { interpret } from "../core/adapters/index.ts";
 import { findings } from "../core/analysis/findings.ts";
+import { collectStl } from "../core/adapters/stl.ts";
 
 const printed = (o: string) => o.trim().split(/\s+/);
 
@@ -283,7 +284,8 @@ test("pointer cells carry a ref to the pointee: vector<Node*> cells and map valu
   const mapDump = () => {
     const st = m.history.stateAt(stepAt(m, "for (const auto& kv : index)")), idx = st.frames[0]!.locals.index as { entries?: unknown[]; source?: string; internalError?: string; size?: number; text?: string; unavailable?: string } | undefined;
     return JSON.stringify({ stl: idx && { source: idx.source, size: idx.size, internalError: idx.internalError, unavailable: idx.unavailable, entries: idx.entries?.slice(0, 5) },
-      sceneNodes: sm.nodes.map((n) => ({ id: n.id, label: n.label, sub: n.sub, ref: n.ref })), scenes: at.map((x) => `${x.kind}:${x.nodes.length}`),
+      sceneNodes: sm.nodes.map((n) => ({ id: n.id, label: n.label, sub: n.sub, ref: n.ref })), scenes: at.map((x) => `${x.id}|${x.title}|${x.kind}:${x.nodes.length}`),
+      stlRefs: collectStl(st).map((r) => `${r.label}@${r.v.addr}:${r.v.container}:${r.v.source}:size${r.v.size}:n${r.v.entries.length}`), locals: Object.entries(st.frames[0]!.locals).map(([k, v]) => `${k}=${(v as { kind?: string; source?: string }).kind}/${(v as { source?: string }).source ?? ""}`),
       liveObjects: Object.entries(st.objects).map(([a, o]) => `${a}:${o.type}:${o.state}`) });
   };
   assert.equal(refs.length, 3, "all three values are object pointers; map dump: " + mapDump());
