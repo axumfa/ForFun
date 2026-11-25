@@ -7,3 +7,4 @@ poc/alloc.log
 *.vsix
 CLAUDE.local.md
 __pycache__
+.local/
