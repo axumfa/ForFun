@@ -31,7 +31,8 @@ export function collectStl(src: Src): StlRef[] {
   const walk = (name: string, v: Value | undefined, depth: number) => {
     if (isStruct(v)) { const m = /^std::(stack|queue)</.exec(v.type), c = v.fields.c; if (m && isStl(c)) { wrap.set(c, m[1] as "stack" | "queue"); walk(name, c, depth + 1); return; } }
     if (isStl(v)) {
-      if (v.source === "raw" && name.split(".").some((p) => p.startsWith("__"))) return;   // compiler temporary not yet bound (range-for `__range1`): garbage, not data
+      // compiler temporary not yet bound (range-for `__for_range`): a stale slot, read as garbage ("raw") or as an empty container (printer/walk of zeroed or foreign memory). Not data.
+      if (name.split(".").some((p) => p.startsWith("__")) && (v.source === "raw" || (v.size <= 0 && v.entries.length === 0))) return;
       const id = `stl:${v.addr ?? name}`, old = refs.get(id), wrapper = wrap?.get(v);          // a range-for's hidden `__range1` aliases the real variable: keep the user's name
       if (!old || (old.label.startsWith("__") && !name.startsWith("__"))) refs.set(id, { id, label: name, v, wrapper });
     }

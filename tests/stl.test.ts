@@ -437,3 +437,18 @@ test("stack/queue: the Logical | Internal switch still works on the underlying d
   const sc = scenesAt(l, i, { stlView: { st: "internal" } }).scenes.find((s) => s.views?.key === "st")!;
   assert.equal(sc.views!.current, "internal"); assert.equal(sc.nodes.filter((n) => n.shape === "box").length, 3);
 });
+
+test("collectStl: an empty hidden range-for local is not a container (stale slot read as a 0-element map, any source)", () => {
+  const mk = (addr: string, source: StlValue["source"], entries: StlValue["entries"]): StlValue =>
+    ({ kind: "stl", container: "map", type: "std::map<int,int>", size: entries.length, truncated: false, entries, source, addr });
+  const real = mk("0x7fffffffccf0", "walk", [{ key: 1, value: 10, id: "0x1" }, { key: 2, value: 20, id: "0x2" }]);
+  for (const source of ["printer", "walk"] as const) {   // CI (ubuntu-latest) read the hidden slot as "printer"; "walk" is the zero-filled-stack variant
+    const stale = mk("0x7ffff7ea2f48", source, []);
+    const refs = collectStl({ frames: [{ fn: "main", file: "main", line: 1, locals: { __for_range: stale, index: real } }], objects: {} });
+    assert.deepEqual(refs.map((r) => r.label), ["index"], source);
+  }
+  // an empty container the user named is still drawn, and a non-empty hidden range (a bound temporary) is kept
+  const empty = mk("0x7fffffffcd00", "walk", []), bound = mk("0x7fffffffce00", "walk", [{ key: 1, value: 1, id: "0x3" }]);
+  const refs = collectStl({ frames: [{ fn: "main", file: "main", line: 1, locals: { e: empty, __for_range: bound } }], objects: {} });
+  assert.deepEqual(refs.map((r) => r.label).sort(), ["__for_range", "e"]);
+});
