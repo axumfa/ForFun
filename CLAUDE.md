@@ -69,6 +69,7 @@ Known limitations are in [docs/limitations.md](docs/limitations.md); read it bef
 - M8: done (logical + internal views for map/set/multi*/list/deque/unordered_*; pointer cells carry `SNode.ref` for click-through, no cross-scene edges)
 - M9: sub-line stepping done (design A, DWARF rows + internal breakpoints, schema v5 `sub`, see D18 / `docs/architecture.md`); remaining: splitting writes inside one statement (design B, `nexti` + store detection, x86-64 only, not built)
 - M13 (not started): incremental snapshots. Every stop re-reads the whole heap (~15 ms/stop at 300 heap objects; see the benchmark in `docs/architecture.md`, "M9"); read only what can have changed (dirty-object tracking, e.g. memory diff against the last read or pointer-reachability from changed locals).
+- Uncaught C++ exception (not started): report a trace that ends from an uncaught exception as a crash carrying the exception type, not as `exited` with a null exit code (today it ends at the throw; documented in `docs/limitations.md`, "C++ exceptions").
 - M10: done (`.github/workflows/ci.yml`, see Commands > CI)
 - M11: bwrap sandbox for the traced run done (`dsv.sandbox`, `bwrapArgs` in runner.ts); remaining: seccomp filter, sandboxed compile step
 - M12: LLDB backend
