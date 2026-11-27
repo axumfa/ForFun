@@ -86,11 +86,27 @@ export function makeDriver(sourceFile: string, setup: string, lang: Lang = "c++"
     lang === "c" ? `int main(void) {` : `int main() {`, ...setup.split("\n").map((l) => "  " + l), `  return 0;`, `}`, ``].join("\n");
 }
 
+/** Message for a platform the GDB + LD_PRELOAD backend cannot run on. Windows users are pointed at the WSL remote, where the extension host is Linux. */
+export function unsupportedPlatformMessage(platform: string): string {
+  const base = `unsupported platform '${platform}': the GDB + LD_PRELOAD backend runs on Linux only (an LLDB backend is planned).`;
+  return platform === "win32" ? `${base} On Windows, use VS Code's WSL remote (Remote - WSL): open your folder in WSL and install this extension there (WSL 2 with g++ and gdb installed in the Linux distribution).` : base;
+}
+
+/** Fail early, naming the missing tool, instead of "compilation failed: sh: exec: g++: not found". Only a command that cannot be started at all counts as missing. */
+function requireTool(cmd: string, role: string, setting: string, pkgs: { apt: string; dnf: string }): void {
+  const err = spawnSync(cmd, ["--version"], { stdio: "ignore", timeout: 15000 }).error as NodeJS.ErrnoException | undefined;
+  if (err?.code === "ENOENT") throw new RunnerError(`${role} '${cmd}' was not found. Install it (Debian/Ubuntu/WSL: sudo apt install ${pkgs.apt}; Fedora: sudo dnf install ${pkgs.dnf}) or set "${setting}" to its full path.`);
+}
+
 export async function runTrace(sourceFile: string, cfg: RunnerConfig, workRoot = os.tmpdir(), signal?: AbortSignal): Promise<RunResult> {
   if (process.platform !== "linux") {
-    throw new RunnerError(`unsupported platform '${process.platform}': the GDB + LD_PRELOAD backend currently supports Linux only (an LLDB backend is planned).`);
+    throw new RunnerError(unsupportedPlatformMessage(process.platform));
   }
   if (!fs.existsSync(sourceFile)) throw new RunnerError(`source file not found: ${sourceFile}`);
+  const isC = languageOf(sourceFile) === "c";
+  if (isC) requireTool(cfg.cCompiler ?? "gcc", "C compiler", "dsv.cCompiler", { apt: "gcc", dnf: "gcc" });
+  requireTool(cfg.compiler, "C++ compiler", "dsv.compiler", { apt: "g++", dnf: "gcc-c++" });   // also builds the allocation shim, so C needs it too
+  requireTool(cfg.gdb, "GDB", "dsv.gdb", { apt: "gdb", dnf: "gdb" });
   const work = fs.mkdtempSync(path.join(workRoot, "dsv-"));
   const prog = path.join(work, "prog"), shim = path.join(work, "libshim.so");
   const lim = { cwd: work, maxBytes: cfg.maxOutputBytes, memoryMB: cfg.maxMemoryMB || undefined, signal };

@@ -6,7 +6,7 @@
 - **Strings**: a `char*`/`const char*` value carries the text it points at (`PointerValue.str`, <= 40 chars, printable ASCII; unreadable or binary memory gives none) and is shown as `"text"`; `char[]` arrays are drawn as characters (`\0` for NUL), and a `char[N]` member holding text is the node's label (when named name/title/word/text/str/label/key/id and no better key) or an extra field instead of a separate numeric array. `std::string` has its own reader. Only `char` pointers are decoded (not `wchar_t`, UTF-8 beyond ASCII).
 - C type names are canonical: a struct with a tag is shown by its tag however it is spelled (`struct Node`, `Node`, a typedef of it); an anonymous `typedef struct {...} Name;` is shown as `Name`.
 
-**Platform**: Linux only (GDB + `LD_PRELOAD`). macOS/Windows return an explicit error. An LLDB backend behind `DebuggerBackend` is future work;
+**Platform**: Linux only (GDB + `LD_PRELOAD`). macOS/Windows return an explicit error; on Windows the message points at VS Code's WSL remote (WSL 2, with `g++` and `gdb` installed in the distribution, the extension installed in WSL), which is the supported way to use it there (not yet verified on a real WSL machine). Missing `g++`/`gcc`/`gdb` are reported by name, with an install hint and the setting to change, before anything is compiled. An LLDB backend behind `DebuggerBackend` is future work;
 LLDB/Clang were not installed here and nothing was tested with them.
 
 **Tracing**
