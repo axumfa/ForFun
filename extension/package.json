@@ -12,6 +12,7 @@
     "Debuggers"
   ],
   "main": "./dist/extension.js",
+  "extensionKind": ["workspace"],
   "activationEvents": [],
   "contributes": {
     "commands": [
