@@ -9,6 +9,10 @@ MAX_STEPS = int(E.get("DSV_MAX_STEPS", "20000"))
 STALL_SECONDS = float(E.get("DSV_STALL_SECONDS", "3"))      # max wall time inside ONE gdb `step`
 MAX_OBJECTS = int(E.get("DSV_MAX_OBJECTS", "3000"))
 MAX_ELEMS = 512
+# Reading a heap object follows its pointers (read_val -> read_heap -> read_struct_fields -> read_val: ~3 Python frames per node), so a list/tree chain of N nodes needs ~3N frames.
+# Python's default limit (1000) killed the tracer at ~330 nodes. 5000 covers ~1600-node chains; it is not higher because on Python 3.10 (Ubuntu 22.04's gdb) each frame also uses C stack,
+# and a gdb crash would be worse than the clean "tracer failure: RecursionError" end record that longer chains still get.
+sys.setrecursionlimit(5000)
 MAX_STL = int(E.get("DSV_MAX_STL_ELEMS", "200"))   # entries read per STL container per step (the rest is only counted)
 NO_PRINTERS = E.get("DSV_NO_PRINTERS") == "1"      # test hook: behave as if no libstdc++ pretty-printers exist
 # M9 sub-line stepping: budgets (a line that exceeds either falls back to the per-line read), kill switch
