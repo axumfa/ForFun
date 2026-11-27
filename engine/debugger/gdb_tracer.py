@@ -67,6 +67,8 @@ def drop_children(b):
 
 def find_alloc(addr):
     """Innermost live allocation containing addr (a make_shared object nests inside its control block); else a freed one (live wins over stale: freed blocks may overlap reused memory)."""
+    i0 = allocs.get(addr)                       # fast path: a LIVE block that starts exactly at addr is the innermost one containing it (a make_shared child starts strictly inside its parent)
+    if i0 is not None and i0["state"] == "LIVE": return addr, i0
     best = stale = (None, None)
     for b, i in allocs.items():
         if b <= addr < b + max(i["size"], 1):
