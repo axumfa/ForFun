@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { runTrace, RunnerError, type RunnerConfig } from "../extension/src/execution/runner.ts";
+import { runTrace, RunnerError, unsupportedPlatformMessage, type RunnerConfig } from "../extension/src/execution/runner.ts";
 
 const root = path.resolve(import.meta.dirname, "..");
 const cfg: RunnerConfig = { engineDir: path.join(root, "engine"), compiler: "g++", gdb: "gdb", std: "c++17", extraFlags: [],
@@ -47,6 +47,22 @@ test("program stdout is captured", async () => {
 
 test("compile errors are reported, not swallowed", async () => {
   await assert.rejects(runTrace(src("bad.cpp", "int main(){ return x; }"), cfg), (e: Error) => e instanceof RunnerError && /compilation failed/.test(e.message));
+});
+
+test("a missing compiler or debugger is named, with an install hint and the setting to change (not 'compilation failed: sh: exec: ... not found')", async () => {
+  const cpp = src("ok.cpp", "int main(){ return 0; }"), c = src("ok.c", "int main(void){ return 0; }");
+  const msg = async (p: string, c2: Partial<RunnerConfig>) => { try { await runTrace(p, { ...cfg, ...c2 }); return "no error"; } catch (e) { return (e as Error).message; } };
+  for (const [m, what, setting] of [[await msg(cpp, { compiler: "dsv-no-such-g++" }), "dsv-no-such-g++", "dsv.compiler"], [await msg(cpp, { gdb: "/no/such/gdb" }), "/no/such/gdb", "dsv.gdb"],
+    [await msg(c, { cCompiler: "dsv-no-such-gcc" }), "dsv-no-such-gcc", "dsv.cCompiler"]] as const) {
+    assert.match(m, /not found/, m); assert.ok(m.includes(what), m); assert.match(m, /apt install/, m); assert.ok(m.includes(`"${setting}"`), m);
+    assert.doesNotMatch(m, /compilation failed|debugger produced no trace/, m);
+  }
+});
+
+test("the unsupported-platform message tells a Windows user to use the WSL remote", () => {
+  assert.match(unsupportedPlatformMessage("win32"), /WSL/);
+  assert.match(unsupportedPlatformMessage("darwin"), /Linux only/);
+  assert.doesNotMatch(unsupportedPlatformMessage("darwin"), /WSL/);
 });
 
 test("infinite loop hits step limit", async () => {
