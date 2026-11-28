@@ -25,12 +25,12 @@ vector, `std::vector<T*>` cells click through to their nodes), tries, STL contai
 (hover). Edges are always observed pointer values; classification is a heuristic.
 
 ## What a run covers today
-One source file per run: it is compiled on its own, so a program split over several `.c`/`.cpp` files does not link (put the data structure and a `main` in one file, or open the implementation file and pick a function/class to call from a generated `main`). Makefiles and CMake are not used. The program's stdin is empty and it gets no command-line arguments. Only code in the opened file is stepped through; functions defined in included headers run but are not shown line by line.
+One source file per run: it is compiled on its own, so a program split over several `.c`/`.cpp` files does not link (put the data structure and a `main` in one file, or open the implementation file and pick a function/class to call from a generated `main`). Makefiles and CMake are not used. Give the program input with `dsv.stdin` (text, e.g. `"3\n10 20 30\n"`) or `dsv.stdinFile` (a file; relative to the visualized file's folder), and command-line arguments with `dsv.args` (one array item per argument); by default stdin is empty and there are no arguments. Only code in the opened file is stepped through; functions defined in included headers run but are not shown line by line.
 
 ## Requirements and settings
 Linux, `g++` (also builds the allocation shim), `gcc` for C files, `gdb` with Python support. The language comes from the file extension
 (`.c` = C; `.cpp .cc .cxx .C` = C++). Heap blocks from `malloc/calloc/realloc/free` and `new/delete` are tracked. Settings under `dsv.*`: compiler, cCompiler,
-gdb, cppStandard, cStd (default `c11`), extraCompilerFlags, extraCFlags, timeouts, maxSteps, maxMemoryMB, isolateNetwork, sandbox (`auto`: run the program under bubblewrap when installed: read-only filesystem, no network, `$HOME` hidden). See `docs/limitations.md` for what is *not* supported (important before relying on it).
+gdb, cppStandard, cStd (default `c11`), extraCompilerFlags, extraCFlags, args, stdin, stdinFile, timeouts, maxSteps, maxMemoryMB, isolateNetwork, sandbox (`auto`: run the program under bubblewrap when installed: read-only filesystem, no network, `$HOME` hidden). See `docs/limitations.md` for what is *not* supported (important before relying on it).
 
 ## Develop
 `npm install && npm run build && npm test` — F5 on `extension/` runs it in an Extension Development Host. `npm run trace -- examples/binary-trees/bst.cpp last` traces a file and prints the scenes without VS Code. Architecture: `docs/architecture.md`.
