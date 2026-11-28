@@ -12,7 +12,7 @@ test("package.json: a workspace extension (runs inside the WSL remote, where g++
   assert.equal(pkg.main, "./dist/extension.js");
 });
 
-test("the .vsix file list has the bundle and engine but no Python bytecode from the build machine", { skip: !fs.existsSync(path.join(ext, "dist", "extension.js")) && "run `npm run build` first" }, () => {
+test("the .vsix file list has the bundle and engine but no Python bytecode from the build machine", { skip: !["dist/extension.js", "README.md"].every((f) => fs.existsSync(path.join(ext, f))) && "run `npm run build` first (dist/ and README.md are build outputs)" }, () => {
   const r = spawnSync("npx", ["--no-install", "vsce", "ls", "--no-dependencies"], { cwd: ext, encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);
   const files = r.stdout.split("\n").map((l) => l.trim()).filter(Boolean);

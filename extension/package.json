@@ -121,6 +121,24 @@
           "type": "boolean",
           "default": true,
           "description": "Run the traced program in a new network namespace when the OS allows it (best effort; not a full sandbox)."
+        },
+        "dsv.args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Command-line arguments for the program (argv[1], argv[2], ...). Each item is one argument, passed as is (no shell quoting needed). No newline characters."
+        },
+        "dsv.stdin": {
+          "type": "string",
+          "default": "",
+          "description": "Text fed to the program's standard input, e.g. \"3\\n10 20 30\\n\" (a JSON string: \\n is a newline). Empty means the program sees end-of-file. Up to 1 MiB."
+        },
+        "dsv.stdinFile": {
+          "type": "string",
+          "default": "",
+          "description": "A file whose contents are fed to the program's standard input; a relative path is relative to the folder of the file you visualize. Takes precedence over dsv.stdin."
         }
       }
     }

@@ -1,12 +1,12 @@
 import * as path from "node:path";
 import * as vscode from "vscode";
-import { runTrace, RunnerError, languageOf, type RunnerConfig } from "../execution/runner.ts";
+import { runTrace, RunnerError, languageOf, resolveStdinFile, type RunnerConfig } from "../execution/runner.ts";
 import { VisualizerPanel } from "../communication/panel.ts";
 import { analyzeSource } from "../../../core/analysis/static.ts";
 import { setupTemplate, setupPrompt } from "./templates.ts";
 import type { Logger } from "../logger.ts";
 
-export function readConfig(ctx: vscode.ExtensionContext, entry?: { setup: string }): RunnerConfig {
+export function readConfig(ctx: vscode.ExtensionContext, entry?: { setup: string }, sourceFile?: string): RunnerConfig {
   const c = vscode.workspace.getConfiguration("dsv");
   return {
     engineDir: path.join(ctx.extensionPath, "engine"),
@@ -17,6 +17,7 @@ export function readConfig(ctx: vscode.ExtensionContext, entry?: { setup: string
     maxSteps: c.get("maxSteps", 20000), maxOutputBytes: 1 << 20,
     subSteps: c.get("subSteps", true), maxSubStepsPerLine: c.get("maxSubStepsPerLine", 64), maxSubStepsPerRun: c.get("maxSubStepsPerRun", 5000),
     maxMemoryMB: c.get("maxMemoryMB", 4096), isolateNetwork: c.get("isolateNetwork", true), sandbox: c.get<"off" | "auto">("sandbox", "auto"), entry,
+    args: c.get<string[]>("args", []), stdin: c.get("stdin", ""), stdinFile: sourceFile ? resolveStdinFile(c.get("stdinFile", ""), sourceFile) : undefined,
   };
 }
 
@@ -67,7 +68,7 @@ export async function visualize(ctx: vscode.ExtensionContext, log: Logger): Prom
   try {
     const r = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "Tracing execution", cancellable: true }, (_p, token) => {
       const ac = new AbortController(); token.onCancellationRequested(() => ac.abort());
-      return runTrace(file, readConfig(ctx, entry), undefined, ac.signal);
+      return runTrace(file, readConfig(ctx, entry, file), undefined, ac.signal);
     });
     log.info("trace.ok", { file, steps: r.trace.steps.length, end: r.trace.end?.reason, ms: Date.now() - t0, entry: entry ? pick.name : "main" });
     panel.post({ type: "trace", id: Date.now(), fileName: path.basename(file), sources: r.sources, trace: r.trace, programOutput: r.programOutput });
