@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { runTrace, RunnerError, unsupportedPlatformMessage, type RunnerConfig } from "../extension/src/execution/runner.ts";
+import { runTrace, RunnerError, unsupportedPlatformMessage, resolveStdinFile, type RunnerConfig } from "../extension/src/execution/runner.ts";
 
 const root = path.resolve(import.meta.dirname, "..");
 const cfg: RunnerConfig = { engineDir: path.join(root, "engine"), compiler: "g++", gdb: "gdb", std: "c++17", extraFlags: [],
@@ -63,6 +63,55 @@ test("the unsupported-platform message tells a Windows user to use the WSL remot
   assert.match(unsupportedPlatformMessage("win32"), /WSL/);
   assert.match(unsupportedPlatformMessage("darwin"), /Linux only/);
   assert.doesNotMatch(unsupportedPlatformMessage("darwin"), /WSL/);
+});
+
+const ARGV_SRC = `#include <cstdio>
+int main(int argc, char** argv) { std::printf("argc=%d\\n", argc); for (int i = 1; i < argc; i++) std::printf("[%s]\\n", argv[i]); return 0; }
+`;
+const SUM_SRC = `#include <cstdio>
+int main() { int n = 0, x = 0, s = 0; if (std::scanf("%d", &n) != 1) { std::printf("no input\\n"); return 1; } for (int i = 0; i < n; i++) { std::scanf("%d", &x); s += x; } std::printf("sum=%d\\n", s); return 0; }
+`;
+
+test("dsv.args reach main's argv literally (spaces, $VARS, quotes are not interpreted by a shell)", async () => {
+  const args = ["hello world", "$HOME", "it's", '"q"', "a;b", "*"];
+  const r = await runTrace(src("argv.cpp", ARGV_SRC), { ...cfg, args });
+  assert.equal(r.programOutput, `argc=${args.length + 1}\n` + args.map((a) => `[${a}]\n`).join(""));
+  assert.equal((await runTrace(src("argv0.cpp", ARGV_SRC), cfg)).programOutput, "argc=1\n", "no args by default");
+});
+
+test("dsv.stdin / dsv.stdinFile feed the program's stdin; the default is an empty stdin (EOF)", async () => {
+  const f = src("sum.cpp", SUM_SRC);
+  assert.equal((await runTrace(f, cfg)).programOutput, "no input\n");
+  assert.equal((await runTrace(f, { ...cfg, stdin: "3\n10 20 30\n" })).programOutput, "sum=60\n");
+  const inFile = src("in.txt", "2\n5 6\n");
+  assert.equal((await runTrace(f, { ...cfg, stdinFile: inFile })).programOutput, "sum=11\n");
+  assert.equal((await runTrace(f, { ...cfg, stdin: "1\n99\n", stdinFile: inFile })).programOutput, "sum=11\n", "the file wins over the inline text");
+  await assert.rejects(runTrace(f, { ...cfg, stdinFile: path.join(tmp, "missing.txt") }), (e: Error) => e instanceof RunnerError && /stdin file/.test(e.message));
+});
+
+test("resolveStdinFile: blank = none, absolute as is, relative to the visualized file's folder", () => {
+  assert.equal(resolveStdinFile("", "/w/a/main.cpp"), undefined); assert.equal(resolveStdinFile("  ", "/w/a/main.cpp"), undefined);
+  assert.equal(resolveStdinFile("/in/x.txt", "/w/a/main.cpp"), "/in/x.txt"); assert.equal(resolveStdinFile("data/in.txt", "/w/a/main.cpp"), "/w/a/data/in.txt");
+});
+
+test("stdin and args also work inside the bubblewrap sandbox", { skip: !sandboxAvailable && "bwrap not usable here" }, async () => {
+  const r = await runTrace(src("sum_sb.cpp", SUM_SRC), { ...cfg, sandbox: "auto", stdin: "2\n7 8\n" });
+  assert.equal(r.sandbox, "bwrap"); assert.equal(r.programOutput, "sum=15\n");
+  assert.equal((await runTrace(src("argv_sb.cpp", ARGV_SRC), { ...cfg, sandbox: "auto", args: ["x y"] })).programOutput, "argc=2\n[x y]\n");
+});
+
+test("stdin and args also reach a program run through the function/class driver", async () => {
+  const f = src("drv.cpp", `#include <cstdio>
+int total() { int n = 0, s = 0; std::scanf("%d", &n); s += n; return s; }
+`);
+  const r = await runTrace(f, { ...cfg, stdin: "41\n", entry: { setup: 'int t = total(); std::printf("t=%d\\n", t);' } });
+  assert.equal(r.programOutput, "t=41\n");
+});
+
+test("args with control characters are refused (they would be extra gdb commands); so is an oversized stdin", async () => {
+  const f = src("argv2.cpp", ARGV_SRC);
+  for (const bad of ["a\nshell id", "a\rb", "a\0b"]) await assert.rejects(runTrace(f, { ...cfg, args: [bad] }), (e: Error) => e instanceof RunnerError && /control character/.test(e.message));
+  await assert.rejects(runTrace(f, { ...cfg, stdin: "x".repeat((1 << 20) + 1) }), (e: Error) => e instanceof RunnerError && /stdin is larger/.test(e.message));
 });
 
 test("infinite loop hits step limit", async () => {

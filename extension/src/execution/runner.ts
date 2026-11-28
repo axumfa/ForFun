@@ -23,6 +23,10 @@ export interface RunnerConfig {
   isolateNetwork: boolean;  // run inside a new network namespace when the OS allows it
   /** "auto": run the traced program inside bubblewrap when it works (read-only filesystem, private /tmp, $HOME hidden, no network/IPC/PID sharing). Absent = "off". */
   sandbox?: "off" | "auto";
+  /** Command-line arguments of the traced program (argv[1..]); passed literally, no shell interpretation. No newline, carriage return or NUL (they would be extra debugger commands). */
+  args?: string[];
+  /** Text fed to the program's stdin. Default: empty (EOF). `stdinFile` (a path, read by the extension, not by the program) wins over `stdin`. At most 1 MiB. */
+  stdin?: string; stdinFile?: string;
   /** Optional driver: C/C++ statements run from a generated main() that includes the source (renamed main -> __dsv_user_main). */
   entry?: { setup: string };
 }
@@ -98,6 +102,21 @@ function requireTool(cmd: string, role: string, setting: string, pkgs: { apt: st
   if (err?.code === "ENOENT") throw new RunnerError(`${role} '${cmd}' was not found. Install it (Debian/Ubuntu/WSL: sudo apt install ${pkgs.apt}; Fedora: sudo dnf install ${pkgs.dnf}) or set "${setting}" to its full path.`);
 }
 
+const MAX_STDIN_BYTES = 1 << 20;
+
+/** A `dsv.stdinFile` that is relative is taken relative to the folder of the file being visualized; blank means none. */
+export const resolveStdinFile = (p: string, sourceFile: string): string | undefined => (p.trim() ? (path.isAbsolute(p) ? p : path.join(path.dirname(sourceFile), p)) : undefined);
+
+/** The program's stdin text and a checked argv. Throws RunnerError for what we refuse: control characters in args, an unreadable stdin file, a stdin over 1 MiB. */
+function programInput(cfg: RunnerConfig): { args: string[]; stdin: string } {
+  const args = cfg.args ?? [];
+  args.forEach((a, i) => { if (/[\n\r\0]/.test(a)) throw new RunnerError(`argument ${i + 1} of dsv.args contains a control character (newline, carriage return or NUL), which is not allowed.`); });
+  let stdin = cfg.stdin ?? "";
+  if (cfg.stdinFile) { try { stdin = fs.readFileSync(cfg.stdinFile, "utf8"); } catch (e) { throw new RunnerError(`cannot read the stdin file '${cfg.stdinFile}': ${(e as Error).message}`); } }
+  if (Buffer.byteLength(stdin) > MAX_STDIN_BYTES) throw new RunnerError(`the stdin is larger than ${MAX_STDIN_BYTES} bytes.`);
+  return { args, stdin };
+}
+
 export async function runTrace(sourceFile: string, cfg: RunnerConfig, workRoot = os.tmpdir(), signal?: AbortSignal): Promise<RunResult> {
   if (process.platform !== "linux") {
     throw new RunnerError(unsupportedPlatformMessage(process.platform));
@@ -107,6 +126,7 @@ export async function runTrace(sourceFile: string, cfg: RunnerConfig, workRoot =
   if (isC) requireTool(cfg.cCompiler ?? "gcc", "C compiler", "dsv.cCompiler", { apt: "gcc", dnf: "gcc" });
   requireTool(cfg.compiler, "C++ compiler", "dsv.compiler", { apt: "g++", dnf: "gcc-c++" });   // also builds the allocation shim, so C needs it too
   requireTool(cfg.gdb, "GDB", "dsv.gdb", { apt: "gdb", dnf: "gdb" });
+  const input = programInput(cfg);
   const work = fs.mkdtempSync(path.join(workRoot, "dsv-"));
   const prog = path.join(work, "prog"), shim = path.join(work, "libshim.so");
   const lim = { cwd: work, maxBytes: cfg.maxOutputBytes, memoryMB: cfg.maxMemoryMB || undefined, signal };
@@ -131,7 +151,9 @@ export async function runTrace(sourceFile: string, cfg: RunnerConfig, workRoot =
     if (c2.code !== 0) throw new RunnerError(`engine shim build failed:\n${c2.stderr}`);
 
     const traceOut = path.join(work, "trace.jsonl"), progOut = path.join(work, "program_out.txt");
-    const env: NodeJS.ProcessEnv = { ...process.env, DSV_SRC: sourceFile, DSV_OUT: traceOut, DSV_ALLOC_LOG: path.join(work, "alloc.log"),
+    const stdinPath = path.join(work, "stdin.txt");
+    fs.writeFileSync(stdinPath, input.stdin);
+    const env: NodeJS.ProcessEnv = { ...process.env, DSV_SRC: sourceFile, DSV_STDIN: stdinPath, DSV_ARGS: JSON.stringify(input.args), DSV_OUT: traceOut, DSV_ALLOC_LOG: path.join(work, "alloc.log"),
       DSV_SHIM: shim, DSV_PROG_OUT: progOut, DSV_MAX_STEPS: String(cfg.maxSteps),
       DSV_TRACER_DIR: path.join(cfg.engineDir, "debugger"), DSV_SUBSTEP: cfg.subSteps === false ? "0" : "1",
       DSV_SUBSTEP_LINE: String(cfg.maxSubStepsPerLine ?? 64), DSV_SUBSTEP_RUN: String(cfg.maxSubStepsPerRun ?? 5000) };

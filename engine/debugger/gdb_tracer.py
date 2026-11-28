@@ -1,7 +1,7 @@
 """GDB backend: single-steps a -O0 -g debuggee and writes trace schema v5 (JSONL).
 Run:  gdb -q -batch -x gdb_tracer.py --args ./prog    with DSV_* env vars (see CONFIG).
 Principle: every value written here was read from the debuggee's memory; nothing is inferred or invented."""
-import gdb, glob, itertools, json, os, re, signal, sys, threading, time
+import gdb, glob, itertools, json, os, re, shlex, signal, sys, threading, time
 
 SCHEMA = 5
 E = os.environ
@@ -789,7 +789,10 @@ def main():
     # would claim the log (root pid) and then be disabled in the exec'd program. The wrapper runs after the shell.
     gdb.execute("set exec-wrapper env LD_PRELOAD=%s DSV_ALLOC_LOG=%s" % (E["DSV_SHIM"], LOG))
     gdb.execute("break main")
-    gdb.execute("run > %s < /dev/null" % E["DSV_PROG_OUT"], to_string=True)
+    # argv and stdin of the program. The shell gdb starts it with parses the command line, so every word is quoted; a newline/CR/NUL would end the command and start another one: refused.
+    args = json.loads(E.get("DSV_ARGS") or "[]")
+    if any(re.search(r"[\n\r\0]", a) for a in args): return end("error", None, "an argument contains a control character (newline, carriage return or NUL)")
+    gdb.execute("run %s > %s < %s" % (" ".join(shlex.quote(a) for a in args), shlex.quote(E["DSV_PROG_OUT"]), shlex.quote(E.get("DSV_STDIN") or "/dev/null")), to_string=True)
     # C++ exceptions: gdb follows `step` through a throw only when it finds `_Unwind_DebugHook` in libgcc_s, which Ubuntu's stripped libgcc_s lacks (the
     # program then runs to its end from the throw, and the trace stops there). A breakpoint where a handler is entered makes the stop explicit: the main
     # loop's non-user branch `finish`es out of libstdc++ until it is back in traced user code (the handler: the trace continues there) or keeps
